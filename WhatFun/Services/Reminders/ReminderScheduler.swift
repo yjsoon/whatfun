@@ -22,7 +22,8 @@ protocol ReminderScheduling: Sendable {
     func cancel(identifier: String) async
 }
 
-actor LocalReminderScheduler: ReminderScheduling {
+@MainActor
+final class LocalReminderScheduler: ReminderScheduling {
     private let center: UNUserNotificationCenter
     private let calendar: Calendar
 
@@ -100,4 +101,3 @@ actor InMemoryReminderScheduler: ReminderScheduling {
         requests[identifier]
     }
 }
-
