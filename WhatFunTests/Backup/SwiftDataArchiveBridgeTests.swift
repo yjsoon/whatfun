@@ -68,6 +68,14 @@ struct SwiftDataArchiveBridgeTests {
         #expect(session.cycleID == cycle.id)
         #expect(item.status == .completed)
         #expect(item.sessionCount == 1)
+        #expect(item.releaseYear == 2024)
+        #expect(item.userEditedFieldMask == 17)
+        #expect(item.metadataLastRefreshedAt == timestamp)
+        #expect(unit.numberValue == 2)
+        #expect(unit.numberLabel == "2")
+        #expect(session.source == .manual)
+        #expect(quote.sortOrder == 7)
+        #expect(quote.updatedAt == timestamp.addingTimeInterval(10))
 
         let restoredCredentialKey = try #require(reference.credentialKeychainID)
         #expect(restoredCredentialKey != fixture.sourceCredentialKey)
@@ -186,6 +194,9 @@ struct SwiftDataArchiveBridgeTests {
         )
         item.comment = "Preserve the full history."
         item.isFavorite = true
+        item.releaseYear = 2024
+        item.userEditedFieldMask = 17
+        item.metadataLastRefreshedAt = timestamp
         context.insert(item)
 
         let unit = ContentUnit(
@@ -197,6 +208,8 @@ struct SwiftDataArchiveBridgeTests {
             createdAt: timestamp
         )
         unit.seasonNumber = 2
+        unit.numberValue = 2
+        unit.numberLabel = "2"
         unit.releaseDate = timestamp
         unit.ratingHalfSteps = 9
         context.insert(unit)
@@ -258,9 +271,11 @@ struct SwiftDataArchiveBridgeTests {
             episode: unit,
             text: "Every record is a memory.",
             timestampSeconds: 1_234,
+            sortOrder: 7,
             sessionID: session.id,
             createdAt: timestamp
         )
+        quote.updatedAt = timestamp.addingTimeInterval(10)
         context.insert(quote)
         unit.notableQuotes = [quote]
 

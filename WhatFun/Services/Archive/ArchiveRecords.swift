@@ -97,10 +97,16 @@ nonisolated struct ArchiveItemRecord: Codable, Equatable, Sendable, Identifiable
     var pageCount: Int?
     var runtimeMinutes: Double?
     var releaseDate: Date?
+    /// App-native fidelity fields may be absent in portable CSV imports.
+    var releaseYear: Int?
+    var userEditedFieldMask: Int64?
+    var metadataLastRefreshedAt: Date?
+    var preferredArtworkID: UUID?
     var createdAt: Date
     var updatedAt: Date
     var archivedAt: Date?
     var deletedAt: Date?
+    var purgeAfter: Date?
     var isFavorite: Bool = false
     var comment: String?
     var projectedStatus: ArchiveLifecycleStatus = .planned
@@ -129,6 +135,8 @@ nonisolated struct ArchiveUnitRecord: Codable, Equatable, Sendable, Identifiable
     var guid: String?
     var canonicalURL: String?
     var sortIndex: Int
+    var numberValue: Double?
+    var numberLabel: String?
     var seasonNumber: Int?
     var episodeNumber: Int?
     var volumeNumber: Int?
@@ -143,6 +151,12 @@ nonisolated struct ArchiveUnitRecord: Codable, Equatable, Sendable, Identifiable
     var comment: String?
     var artworkURL: String?
     var artworkArchivePath: String?
+    var releaseDate: Date?
+    var publishedAt: Date?
+    var userEditedFieldMask: Int64?
+    var preferredArtworkID: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
 }
 
 /// One intentional pass through an item or unit, such as an initial read or a replay.
@@ -152,6 +166,7 @@ nonisolated struct ArchiveCycleRecord: Codable, Equatable, Sendable, Identifiabl
     var unitID: UUID?
     var sequence: Int
     var kind: ArchiveCycleKind
+    var repeatOfCycleID: UUID?
     var status: ArchiveLifecycleStatus
     var startedAt: Date?
     var completedAt: Date?
@@ -162,6 +177,8 @@ nonisolated struct ArchiveCycleRecord: Codable, Equatable, Sendable, Identifiabl
     var elapsedMinutes: Double?
     var playtimeMinutes: Double?
     var completionPercentage: Double?
+    var createdAt: Date?
+    var updatedAt: Date?
 }
 
 /// A timestamped consumption session. Progress fields are optional and deliberately shared
@@ -189,6 +206,8 @@ nonisolated struct ArchiveSessionRecord: Codable, Equatable, Sendable, Identifia
     var isCompletion: Bool = false
     var rating: Double?
     var note: String?
+    var source: String?
+    var updatedAt: Date?
 }
 
 /// An immutable lifecycle fact. `details` is for small, forward-compatible values only.
@@ -216,6 +235,8 @@ nonisolated struct ArchiveQuoteRecord: Codable, Equatable, Sendable, Identifiabl
     var timestampSeconds: Double?
     var comment: String?
     var capturedAt: Date
+    var sortIndex: Int?
+    var updatedAt: Date?
 }
 
 nonisolated struct ArchiveListRecord: Codable, Equatable, Sendable, Identifiable {
@@ -294,6 +315,7 @@ nonisolated struct ArchiveArtworkRecord: Codable, Equatable, Sendable, Identifia
     var unitID: UUID?
     var kind: ArchiveArtworkKind
     var remoteURL: String?
+    var cacheKey: String?
     var archivePath: String?
     var imageData: Data?
     var contentHash: String?

@@ -82,10 +82,15 @@ final class SwiftDataArchiveBridge {
                 pageCount: item.pageCount,
                 runtimeMinutes: item.runtimeSeconds.map { Double($0) / 60 },
                 releaseDate: item.releaseDate,
+                releaseYear: item.releaseYear,
+                userEditedFieldMask: item.userEditedFieldMask,
+                metadataLastRefreshedAt: item.metadataLastRefreshedAt,
+                preferredArtworkID: item.preferredArtworkID,
                 createdAt: item.createdAt,
                 updatedAt: item.updatedAt,
                 archivedAt: item.archivedAt,
                 deletedAt: item.trashedAt,
+                purgeAfter: item.purgeAfter,
                 isFavorite: item.isFavorite,
                 comment: item.comment,
                 projectedStatus: archiveStatus(item),
@@ -120,6 +125,8 @@ final class SwiftDataArchiveBridge {
                 guid: unit.episodeGUID,
                 canonicalURL: unit.canonicalURLString,
                 sortIndex: unit.sortOrder,
+                numberValue: unit.numberValue,
+                numberLabel: unit.numberLabel,
                 seasonNumber: unit.seasonNumber,
                 episodeNumber: unit.episodeNumber,
                 volumeNumber: unit.unitKind == .comicVolume ? safeInteger(unit.numberValue) : nil,
@@ -136,6 +143,12 @@ final class SwiftDataArchiveBridge {
                 comment: unit.comment,
                 artworkURL: preferredArtwork?.remoteURLString,
                 artworkArchivePath: nil,
+                releaseDate: unit.releaseDate,
+                publishedAt: unit.publishedAt,
+                userEditedFieldMask: unit.userEditedFieldMask,
+                preferredArtworkID: unit.preferredArtworkID,
+                createdAt: unit.createdAt,
+                updatedAt: unit.updatedAt,
             )
         }
 
@@ -150,6 +163,7 @@ final class SwiftDataArchiveBridge {
                 unitID: cycle.targetUnitID.flatMap { unitIDs.contains($0) ? $0 : nil },
                 sequence: cycle.ordinal,
                 kind: archiveCycleKind(cycle.cycleKind, mediaKind: itemKind),
+                repeatOfCycleID: cycle.repeatOfCycleID,
                 status: archiveStatus(cycle.status),
                 startedAt: cycle.startedAt,
                 completedAt: cycle.completedAt,
@@ -160,6 +174,8 @@ final class SwiftDataArchiveBridge {
                 elapsedMinutes: latest?.elapsedSeconds.map { Double($0) / 60 },
                 playtimeMinutes: latest?.gamePlaytimeTotalSnapshotSeconds.map { Double($0) / 60 },
                 completionPercentage: latest?.completionPercent,
+                createdAt: cycle.createdAt,
+                updatedAt: cycle.updatedAt,
             )
         }
 
@@ -187,6 +203,8 @@ final class SwiftDataArchiveBridge {
                 isCompletion: false,
                 rating: nil,
                 note: session.note,
+                source: session.sourceRaw,
+                updatedAt: session.updatedAt,
             )
         }
 
@@ -221,6 +239,8 @@ final class SwiftDataArchiveBridge {
                 timestampSeconds: quote.timestampSeconds.map(Double.init),
                 comment: quote.comment,
                 capturedAt: quote.createdAt,
+                sortIndex: quote.sortOrder,
+                updatedAt: quote.updatedAt,
             )
         }
 
@@ -305,6 +325,7 @@ final class SwiftDataArchiveBridge {
                 unitID: artwork.unitID.flatMap { unitIDs.contains($0) ? $0 : nil },
                 kind: archiveArtworkKind(artwork.kind),
                 remoteURL: artwork.remoteURLString,
+                cacheKey: artwork.cacheKey,
                 archivePath: nil,
                 imageData: artwork.kind == .userImage ? artwork.imageData : nil,
                 contentHash: artwork.contentHash,
@@ -441,7 +462,9 @@ final class SwiftDataArchiveBridge {
                 item.summary = record.summary
                 item.creatorLine = record.creators.joined(separator: ", ").nilIfEmpty
                 item.releaseDate = record.releaseDate
-                item.releaseYear = record.releaseDate.map { Calendar(identifier: .gregorian).component(.year, from: $0) }
+                item.releaseYear = record.releaseYear ?? record.releaseDate.map {
+                    Calendar(identifier: .gregorian).component(.year, from: $0)
+                }
                 item.languageCode = record.languageCode
                 item.pageCount = record.pageCount
                 item.runtimeSeconds = seconds(record.runtimeMinutes)
@@ -450,9 +473,12 @@ final class SwiftDataArchiveBridge {
                 item.ratingOverrideHalfSteps = ratingHalfSteps(record.ratingOverride)
                 item.archivedAt = record.archivedAt
                 item.trashedAt = record.deletedAt
-                item.purgeAfter = record.deletedAt.flatMap {
+                item.purgeAfter = record.purgeAfter ?? record.deletedAt.flatMap {
                     Calendar(identifier: .gregorian).date(byAdding: .day, value: 30, to: $0)
                 }
+                item.userEditedFieldMask = record.userEditedFieldMask ?? 0
+                item.metadataLastRefreshedAt = record.metadataLastRefreshedAt
+                item.preferredArtworkID = record.preferredArtworkID
                 item.updatedAt = record.updatedAt
                 if item.mediaKind == .podcast {
                     item.podcastFollowState = podcastFollowState(record.projectedStatus)
@@ -524,28 +550,33 @@ final class SwiftDataArchiveBridge {
                     kind: unitKind(record.kind, ownerKind: item.mediaKind),
                     title: record.title,
                     sortOrder: record.sortIndex,
-                    createdAt: record.releasedAt ?? item.createdAt,
+                    createdAt: record.createdAt ?? record.releasedAt ?? item.createdAt,
                 )
                 unit.summary = record.summary
                 unit.episodeGUID = record.guid
                 unit.episodeGUIDHash = record.guid.map(stableHash)
                 unit.canonicalURLString = record.canonicalURL
-                unit.releaseDate = record.releasedAt
-                unit.publishedAt = unit.unitKind == .podcastEpisode ? record.releasedAt : nil
+                unit.releaseDate = record.releaseDate ?? record.releasedAt
+                unit.publishedAt = record.publishedAt ?? (unit.unitKind == .podcastEpisode ? record.releasedAt : nil)
                 unit.durationSeconds = seconds(record.durationMinutes)
                 unit.pageCount = record.pageCount
                 unit.seasonNumber = record.seasonNumber
                 unit.episodeNumber = record.episodeNumber
-                if unit.unitKind == .comicVolume {
+                unit.numberValue = record.numberValue
+                unit.numberLabel = record.numberLabel
+                if unit.unitKind == .comicVolume, unit.numberValue == nil {
                     unit.numberValue = record.volumeNumber.map(Double.init)
-                    unit.numberLabel = record.volumeNumber.map(String.init)
-                } else if unit.unitKind == .comicIssue {
+                    unit.numberLabel = unit.numberLabel ?? record.volumeNumber.map(String.init)
+                } else if unit.unitKind == .comicIssue, unit.numberLabel == nil {
                     unit.numberLabel = record.issueNumber
-                    unit.numberValue = record.issueNumber.flatMap(Double.init)
+                    unit.numberValue = unit.numberValue ?? record.issueNumber.flatMap(Double.init)
                 }
                 unit.isNotable = record.isNotable
                 unit.comment = record.comment
                 unit.ratingHalfSteps = ratingHalfSteps(record.rating)
+                unit.userEditedFieldMask = record.userEditedFieldMask ?? 0
+                unit.preferredArtworkID = record.preferredArtworkID
+                unit.updatedAt = record.updatedAt ?? unit.createdAt
                 context.insert(unit)
                 item.units = appending(unit, to: item.units, id: \.id)
                 unitsByID[unit.id] = unit
@@ -581,25 +612,29 @@ final class SwiftDataArchiveBridge {
                     targetUnit: target,
                     kind: cycleKind(record.kind),
                     ordinal: record.sequence,
-                    createdAt: record.startedAt ?? item.createdAt,
+                    repeatOfCycleID: record.repeatOfCycleID,
+                    createdAt: record.createdAt ?? record.startedAt ?? item.createdAt,
                 )
                 context.insert(cycle)
                 cycle.status = consumptionStatus(record.status)
                 cycle.startedAt = record.startedAt
                 cycle.completedAt = record.completedAt
+                cycle.updatedAt = record.updatedAt ?? cycle.createdAt
                 item.cycles = appending(cycle, to: item.cycles, id: \.id)
                 target?.cycles = appending(cycle, to: target?.cycles, id: \.id)
                 cyclesByID[cycle.id] = cycle
                 report.insertedRecords += 1
             }
 
-            // Reconnect repeat ancestry from stable order; the archive's cycle kind is semantic.
+            // Older portable archives may not carry repeat ancestry; use stable order as fallback.
             for item in itemsByID.values {
                 let ordered = cyclesByID.values
                     .filter { $0.rootItemID == item.id }
                     .sorted { $0.ordinal < $1.ordinal }
                 for (index, cycle) in ordered.enumerated() where cycle.cycleKind == .repeatConsumption && index > 0 {
-                    cycle.repeatOfCycleID = ordered[index - 1].id
+                    if cycle.repeatOfCycleID == nil {
+                        cycle.repeatOfCycleID = ordered[index - 1].id
+                    }
                 }
             }
 
@@ -622,7 +657,7 @@ final class SwiftDataArchiveBridge {
                     timeZoneIdentifier: record.timeZoneIdentifier,
                     durationSeconds: seconds(record.durationMinutes),
                     note: record.note,
-                    source: .portableImport,
+                    source: record.source.map(RecordSource.value(for:)) ?? .portableImport,
                 )
                 session.endedAt = record.endedAt
                 session.currentPage = record.endPage ?? record.startPage
@@ -634,7 +669,7 @@ final class SwiftDataArchiveBridge {
                 session.gamePlaytimeTotalSnapshotSeconds = seconds(record.cumulativePlaytimeMinutes)
                 session.completionPercent = record.completionPercentage
                 session.createdAt = record.loggedAt
-                session.updatedAt = record.loggedAt
+                session.updatedAt = record.updatedAt ?? record.loggedAt
                 context.insert(session)
                 cycle.sessions = appending(session, to: cycle.sessions, id: \.id)
                 target?.sessions = appending(session, to: target?.sessions, id: \.id)
@@ -678,7 +713,7 @@ final class SwiftDataArchiveBridge {
             }
 
             var quoteIDs = mode == .mergeNew ? Set(try fetchAll(NotableQuote.self).map(\.id)) : []
-            for (sortIndex, record) in payload.quotes.enumerated() {
+            for (fallbackSortIndex, record) in payload.quotes.enumerated() {
                 if quoteIDs.contains(record.id) {
                     report.skippedExistingRecords += 1
                     continue
@@ -694,10 +729,11 @@ final class SwiftDataArchiveBridge {
                     text: record.text,
                     timestampSeconds: record.timestampSeconds.map { Int($0.rounded()) },
                     comment: record.comment,
-                    sortOrder: sortIndex,
+                    sortOrder: record.sortIndex ?? fallbackSortIndex,
                     sessionID: record.sessionID.flatMap { sessionsByID[$0]?.id },
                     createdAt: record.capturedAt,
                 )
+                quote.updatedAt = record.updatedAt ?? record.capturedAt
                 context.insert(quote)
                 episode.notableQuotes = appending(quote, to: episode.notableQuotes, id: \.id)
                 quoteIDs.insert(quote.id)
@@ -836,7 +872,7 @@ final class SwiftDataArchiveBridge {
                     imageData: record.kind == .remote ? nil : record.imageData,
                     createdAt: record.createdAt,
                 )
-                artwork.cacheKey = record.remoteURL.map(stableHash)
+                artwork.cacheKey = record.cacheKey ?? record.remoteURL.map(stableHash)
                 artwork.contentHash = record.contentHash
                 artwork.mimeType = record.mimeType
                 artwork.pixelWidth = record.pixelWidth
@@ -982,14 +1018,18 @@ final class SwiftDataArchiveBridge {
             for record in payload.items {
                 guard let item = itemsByID[record.id] else { continue }
                 let candidates = (item.artworkAssets ?? []).filter { $0.unitID == nil }
-                item.preferredArtworkID = candidates.first(where: {
+                item.preferredArtworkID = record.preferredArtworkID.flatMap { preferredID in
+                    candidates.first(where: { $0.id == preferredID })?.id
+                } ?? candidates.first(where: {
                     $0.remoteURLString == record.artworkURL && record.artworkURL != nil
                 })?.id ?? candidates.first(where: { $0.kind == .userImage })?.id ?? candidates.first?.id
             }
             for record in payload.units {
                 guard let unit = unitsByID[record.id] else { continue }
                 let candidates = unit.artworkAssets ?? []
-                unit.preferredArtworkID = candidates.first(where: {
+                unit.preferredArtworkID = record.preferredArtworkID.flatMap { preferredID in
+                    candidates.first(where: { $0.id == preferredID })?.id
+                } ?? candidates.first(where: {
                     $0.remoteURLString == record.artworkURL && record.artworkURL != nil
                 })?.id ?? candidates.first(where: { $0.kind == .userImage })?.id ?? candidates.first?.id
             }
@@ -1428,6 +1468,10 @@ private extension SwiftDataArchiveBridge {
             guard itemIDs.contains(cycle.itemID) else { throw DurabilityError.invalidArchive("cycle \(cycle.id) has no item") }
             if let unitID = cycle.unitID, unitRoots[unitID] != cycle.itemID {
                 throw DurabilityError.invalidArchive("cycle \(cycle.id) targets another item's unit")
+            }
+            if let repeatID = cycle.repeatOfCycleID,
+               repeatID == cycle.id || cycleRoots[repeatID] != cycle.itemID {
+                throw DurabilityError.invalidArchive("cycle \(cycle.id) has a cross-item or missing repeat ancestor")
             }
         }
         for session in payload.sessions {
