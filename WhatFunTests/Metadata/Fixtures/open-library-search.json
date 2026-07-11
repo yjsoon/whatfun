@@ -1,0 +1,14 @@
+{
+  "numFound": 1,
+  "docs": [
+    {
+      "key": "/works/OL45883W",
+      "title": "Watchmen",
+      "author_name": ["Alan Moore", "Dave Gibbons"],
+      "first_publish_year": 1986,
+      "cover_i": 9255566,
+      "number_of_pages_median": 416,
+      "subject": ["Comics", "Superheroes"]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "id": 550,
+      "title": "Fight Club",
+      "original_title": "Fight Club",
+      "overview": "An insomniac meets a soap maker.",
+      "poster_path": "/fight-club.jpg",
+      "release_date": "1999-10-15"
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 1
+}

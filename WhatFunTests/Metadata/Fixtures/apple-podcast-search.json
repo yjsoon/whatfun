@@ -1,0 +1,18 @@
+{
+  "resultCount": 1,
+  "results": [
+    {
+      "collectionId": 201671138,
+      "collectionName": "The Example Show",
+      "artistName": "Example Studio",
+      "artworkUrl100": "https://example.com/art-100.jpg",
+      "artworkUrl600": "https://example.com/art-600.jpg",
+      "collectionViewUrl": "https://podcasts.apple.com/podcast/id201671138",
+      "feedUrl": "https://example.com/feed.xml",
+      "primaryGenreName": "Society & Culture",
+      "genres": ["Society & Culture", "Podcasts"],
+      "trackCount": 42,
+      "releaseDate": "2026-06-20T09:00:00Z"
+    }
+  ]
+}

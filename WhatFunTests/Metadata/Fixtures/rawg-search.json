@@ -1,0 +1,17 @@
+{
+  "count": 1,
+  "results": [
+    {
+      "id": 3498,
+      "slug": "grand-theft-auto-v",
+      "name": "Grand Theft Auto V",
+      "released": "2013-09-17",
+      "background_image": "https://media.rawg.io/games/gta-v.jpg",
+      "genres": [{"name": "Action"}],
+      "platforms": [
+        {"platform": {"name": "PlayStation 5"}},
+        {"platform": {"name": "PC"}}
+      ]
+    }
+  ]
+}
