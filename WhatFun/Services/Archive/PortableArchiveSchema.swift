@@ -104,7 +104,7 @@ nonisolated enum PortableArchiveSchema {
                 "`rereading`, `rewatching`, `replaying`, `following`, `archived`.",
             "- `unit_kind`: `season`, `episode`, `volume`, `issue` (the owning item's media kind " +
                 "disambiguates TV and podcast episodes).",
-            "- `cycle_kind`: `initial`, `reread`, `rewatch`, `replay`, `repeat_consumption`.",
+            "- `cycle_kind`: `initial`, `installment_continuation`, `reread`, `rewatch`, `replay`, `repeat_consumption`.",
             "- `event_kind`: `created`, `started`, `status_changed`, `progress_updated`, " +
                 "`marked_completed`, `completion_reversed`, `archived`, `restored`, `moved_to_trash`.",
             "- `list_kind`: `manual`, `smart`; `match_mode`: `all`, `any`.",

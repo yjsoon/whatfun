@@ -37,6 +37,7 @@ nonisolated enum ArchiveUnitKind: String, Codable, CaseIterable, Sendable {
 
 nonisolated enum ArchiveCycleKind: String, Codable, CaseIterable, Sendable {
     case initial
+    case installmentContinuation = "installment_continuation"
     case reread
     case rewatch
     case replay
