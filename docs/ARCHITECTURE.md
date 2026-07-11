@@ -29,3 +29,12 @@ The root uses native iOS 26 `Tab` navigation with Home, Library, Lists, and a se
 
 Portable exports are multi-file CSV packages with a manifest, checksums, ISO 8601 timestamps, explicit time zones, stable UUID joins, and named progress columns. A versioned JSON backup preserves exact app fidelity. Sofa, OPML, and Overcast files enter through staging adapters and a review step before insertion.
 
+The formats, redaction rules, and adapter limitations are described in [Data portability and privacy](DATA_PORTABILITY.md).
+
+## CloudKit readiness
+
+CloudKit sync is not enabled. `AppModelContainer` explicitly uses `.none`, so the current release never uploads the SwiftData store.
+
+The V1 schema avoids common CloudKit migration traps: relationships are optional and explicitly inverted, delete rules do not use `.deny`, stable IDs are ordinary attributes rather than uniqueness constraints, and sync-independent history records can rebuild current projections. Services exchange value snapshots rather than retaining live models across actor boundaries.
+
+A future sync release still requires an intentional migration: add the app and CloudKit entitlements, select a private database container, deploy its schema, define conflict behavior for concurrent sessions and lifecycle events, test migration from existing local stores, and decide whether private podcast credentials remain device-only or use a separate secure sync mechanism. Downloaded cover caches remain local and rebuildable; private feed URLs must not be moved from Keychain into syncable model fields.
