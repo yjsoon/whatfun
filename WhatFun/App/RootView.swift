@@ -9,22 +9,14 @@ struct RootView: View {
         TabView(selection: $navigation.selectedTab) {
             Tab("Home", systemImage: "house", value: .home) {
                 NavigationStack(path: $navigation.homePath) {
-                    PlaceholderContent(
-                        title: "WhatFun",
-                        message: "Your current and recent entertainment will live here.",
-                        symbol: "sparkles"
-                    )
+                    HomeView()
                     .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
                 }
             }
 
             Tab("Library", systemImage: "books.vertical", value: .library) {
                 NavigationStack(path: $navigation.libraryPath) {
-                    PlaceholderContent(
-                        title: "Library",
-                        message: "A cover-first archive across all six media types.",
-                        symbol: "books.vertical"
-                    )
+                    LibraryView()
                     .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
                 }
             }

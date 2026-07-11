@@ -95,7 +95,7 @@ struct CoverShape: InsettableShape {
 
 struct SectionHeading: View {
     let title: LocalizedStringKey
-    var subtitle: LocalizedStringKey?
+    var subtitle: LocalizedStringKey? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -113,4 +113,3 @@ struct SectionHeading: View {
         .accessibilityElement(children: .combine)
     }
 }
-
