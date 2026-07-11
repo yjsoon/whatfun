@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 struct RootView: View {
@@ -76,8 +77,8 @@ private struct RouteDestination: View {
         switch route {
         case let .item(id):
             ItemDetailView(itemID: id)
-        case .list:
-            destinationPlaceholder
+        case let .list(id):
+            ListRouteDestination(listID: id)
         case .settings:
             SettingsView()
         case .archived:
@@ -122,6 +123,35 @@ private struct RouteDestination: View {
     }
 }
 
-#Preview {
+private struct ListRouteDestination: View {
+    @Query private var lists: [UserList]
+
+    init(listID: UUID) {
+        let listID = listID
+        _lists = Query(filter: #Predicate<UserList> { list in
+            list.id == listID
+        })
+    }
+
+    var body: some View {
+        if let list = lists.first, list.trashedAt == nil {
+            ListDetailView(source: .user(list))
+        } else {
+            ContentUnavailableView(
+                "List Not Found",
+                systemImage: "rectangle.stack.badge.questionmark",
+                description: Text("This list may have been moved to Recently Deleted.")
+            )
+            .navigationTitle("List")
+            .archiveBackground()
+        }
+    }
+}
+
+#Preview("Empty Archive") {
+    let container = try! AppModelContainer.make(isStoredInMemoryOnly: true)
+
     RootView()
+        .modelContainer(container)
+        .environment(AppServices.preview)
 }

@@ -23,6 +23,16 @@ enum ArtworkRepositoryError: Error, Equatable, LocalizedError {
     }
 }
 
+nonisolated protocol ArtworkLoading: Sendable {
+    func data(for remoteURL: URL, cacheKey: String?) async throws -> Data
+}
+
+nonisolated extension ArtworkLoading {
+    func data(for remoteURL: URL) async throws -> Data {
+        try await data(for: remoteURL, cacheKey: nil)
+    }
+}
+
 struct ArtworkCacheLocation: Sendable {
     let remoteDirectory: URL
     let userDirectory: URL
@@ -44,7 +54,7 @@ struct ArtworkCacheLocation: Sendable {
     }
 }
 
-actor ArtworkRepository {
+actor ArtworkRepository: ArtworkLoading {
     private let session: URLSession
     private let fileManager: FileManager
     private let location: ArtworkCacheLocation
@@ -176,4 +186,3 @@ enum ArtworkDownsampler {
         }.value
     }
 }
-
