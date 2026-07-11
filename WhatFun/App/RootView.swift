@@ -5,6 +5,8 @@ struct RootView: View {
     @State private var navigation = AppNavigation()
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @AppStorage("backup.last-success") private var lastBackupTimestamp = 0.0
+    @AppStorage("backup.last-error") private var lastBackupError = ""
 
     var body: some View {
         @Bindable var navigation = navigation
@@ -66,6 +68,36 @@ struct RootView: View {
                 credentials: services.credentials,
                 reminders: services.reminders
             ).purgeExpired()
+            await writeDailyBackupIfNeeded()
+        }
+    }
+
+    private func writeDailyBackupIfNeeded() async {
+        guard services.allowsAutomaticBackups else { return }
+        if lastBackupTimestamp > 0,
+           Calendar.autoupdatingCurrent.isDateInToday(
+               Date(timeIntervalSince1970: lastBackupTimestamp)
+           ) {
+            return
+        }
+
+        do {
+            let bridge = SwiftDataArchiveBridge(
+                context: modelContext,
+                credentials: services.credentials
+            )
+            let snapshot = try await bridge.snapshot(includePrivateFeedSecrets: false)
+            let envelope = FullFidelityArchiveEnvelope(
+                exportedAt: .now,
+                generator: "WhatFun 0.1 automatic recovery",
+                payload: snapshot.payload
+            )
+            let data = try FullFidelityArchiveCodec.encode(envelope)
+            _ = try await DailyBackupStore.applicationSupport().writeValidatedBackup(data)
+            lastBackupTimestamp = Date.now.timeIntervalSince1970
+            lastBackupError = ""
+        } catch {
+            lastBackupError = error.localizedDescription
         }
     }
 }
@@ -86,7 +118,7 @@ private struct RouteDestination: View {
         case .recentlyDeleted:
             RecentlyDeletedView()
         case .importExport:
-            destinationPlaceholder
+            ImportExportView()
         }
     }
 

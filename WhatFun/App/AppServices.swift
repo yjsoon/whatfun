@@ -7,17 +7,20 @@ final class AppServices {
     @ObservationIgnored let credentials: any CredentialStoring
     @ObservationIgnored let reminders: any ReminderScheduling
     @ObservationIgnored let metadata: MetadataServiceBundle
+    @ObservationIgnored let allowsAutomaticBackups: Bool
 
     init(
         artwork: any ArtworkLoading,
         credentials: any CredentialStoring,
         reminders: any ReminderScheduling,
-        metadata: MetadataServiceBundle
+        metadata: MetadataServiceBundle,
+        allowsAutomaticBackups: Bool = true
     ) {
         self.artwork = artwork
         self.credentials = credentials
         self.reminders = reminders
         self.metadata = metadata
+        self.allowsAutomaticBackups = allowsAutomaticBackups
     }
 
     static func live() throws -> AppServices {
@@ -37,7 +40,8 @@ final class AppServices {
             metadata: MetadataServiceBundle(
                 catalog: MetadataProviderCatalog(providers: []),
                 podcastFeeds: PreviewPodcastFeedRefresher()
-            )
+            ),
+            allowsAutomaticBackups: false
         )
     }
 }
