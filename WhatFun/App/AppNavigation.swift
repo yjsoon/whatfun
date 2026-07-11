@@ -13,6 +13,7 @@ enum AppRoute: Hashable, Sendable {
     case list(UUID)
     case settings
     case importExport
+    case archived
     case recentlyDeleted
 }
 

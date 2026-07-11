@@ -11,6 +11,7 @@ struct ItemEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @AppStorage("reminders.default-hour") private var defaultReminderHour = 9
 
     @State private var draft: ItemDraft
     @State private var didLoadExistingItem = false
@@ -73,8 +74,19 @@ struct ItemEditorView: View {
                 }
             }
             .task {
-                guard !didLoadExistingItem, let existingItem else { return }
-                draft = ItemDraft(item: existingItem)
+                guard !didLoadExistingItem else { return }
+                if let existingItem {
+                    draft = ItemDraft(item: existingItem)
+                } else {
+                    let calendar = Calendar.autoupdatingCurrent
+                    let tomorrow = calendar.date(byAdding: .day, value: 1, to: .now) ?? .now
+                    draft.startReminderDate = calendar.date(
+                        bySettingHour: defaultReminderHour,
+                        minute: 0,
+                        second: 0,
+                        of: tomorrow
+                    ) ?? tomorrow
+                }
                 didLoadExistingItem = true
             }
             .onChange(of: selectedPhoto) { _, item in

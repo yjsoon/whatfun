@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RootView: View {
     @State private var navigation = AppNavigation()
+    @Environment(\.modelContext) private var modelContext
+    @Environment(AppServices.self) private var services
 
     var body: some View {
         @Bindable var navigation = navigation
@@ -57,6 +59,13 @@ struct RootView: View {
                 ListEditorView()
             }
         }
+        .task {
+            _ = try? await TrashPurgeService(
+                context: modelContext,
+                credentials: services.credentials,
+                reminders: services.reminders
+            ).purgeExpired()
+        }
     }
 }
 
@@ -69,7 +78,13 @@ private struct RouteDestination: View {
             ItemDetailView(itemID: id)
         case .list:
             destinationPlaceholder
-        case .settings, .importExport, .recentlyDeleted:
+        case .settings:
+            SettingsView()
+        case .archived:
+            ArchivedItemsView()
+        case .recentlyDeleted:
+            RecentlyDeletedView()
+        case .importExport:
             destinationPlaceholder
         }
     }
@@ -90,6 +105,7 @@ private struct RouteDestination: View {
         case .list: "List"
         case .settings: "Settings"
         case .importExport: "Import & Export"
+        case .archived: "Archived Items"
         case .recentlyDeleted: "Recently Deleted"
         }
     }
@@ -100,6 +116,7 @@ private struct RouteDestination: View {
         case .list: "rectangle.stack"
         case .settings: "gearshape"
         case .importExport: "arrow.up.arrow.down"
+        case .archived: "archivebox"
         case .recentlyDeleted: "trash"
         }
     }
