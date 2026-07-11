@@ -45,7 +45,7 @@ struct RootView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-        .tint(.accentColor)
+        .archiveBackground()
     }
 }
 
@@ -62,6 +62,8 @@ private struct PlaceholderScreen: View {
                 Text(message)
             }
             .navigationTitle(title)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .archiveBackground()
         }
     }
 }
@@ -69,4 +71,3 @@ private struct PlaceholderScreen: View {
 #Preview {
     RootView()
 }
-
