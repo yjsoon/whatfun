@@ -121,38 +121,6 @@ private struct RouteDestination: View {
             ImportExportView()
         }
     }
-
-    private var destinationPlaceholder: some View {
-        ContentUnavailableView(
-            title,
-            systemImage: symbol,
-            description: Text("This destination is being connected to the local archive.")
-        )
-        .navigationTitle(title)
-        .archiveBackground()
-    }
-
-    private var title: LocalizedStringKey {
-        switch route {
-        case .item: "Item"
-        case .list: "List"
-        case .settings: "Settings"
-        case .importExport: "Import & Export"
-        case .archived: "Archived Items"
-        case .recentlyDeleted: "Recently Deleted"
-        }
-    }
-
-    private var symbol: String {
-        switch route {
-        case .item: "rectangle.portrait"
-        case .list: "rectangle.stack"
-        case .settings: "gearshape"
-        case .importExport: "arrow.up.arrow.down"
-        case .archived: "archivebox"
-        case .recentlyDeleted: "trash"
-        }
-    }
 }
 
 private struct ListRouteDestination: View {
