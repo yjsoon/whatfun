@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>Podcast subscriptions</title></head>
+  <body>
+    <outline text="Technology">
+      <outline type="rss" text="Swift by Sundell" xmlUrl="https://example.com/swift/feed.xml" htmlUrl="https://example.com/swift" />
+      <outline type="rss" text="Duplicate" xmlUrl="https://example.com/swift/feed.xml" />
+    </outline>
+    <outline type="rss" xmlUrl="not a feed url" />
+  </body>
+</opml>
+
