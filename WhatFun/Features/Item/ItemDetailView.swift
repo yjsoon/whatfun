@@ -7,10 +7,12 @@ struct ItemDetailView: View {
     @Query private var matchingItems: [LibraryItem]
     @Environment(\.modelContext) private var modelContext
     @Environment(AppNavigation.self) private var navigation
+    @Environment(AppServices.self) private var services
 
     @State private var presentedSheet: DetailSheet?
     @State private var showsDeleteConfirmation = false
     @State private var errorMessage: String?
+    @State private var isRefreshingPodcast = false
 
     init(itemID: UUID) {
         self.itemID = itemID
@@ -116,6 +118,15 @@ struct ItemDetailView: View {
 
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                if item.mediaKind == .podcast {
+                    Button("Refresh Podcast Feed", systemImage: "arrow.clockwise") {
+                        Task { await refreshPodcast(item) }
+                    }
+                    .disabled(isRefreshingPodcast)
+
+                    Divider()
+                }
+
                 statusMenu(for: item)
 
                 Divider()
@@ -216,6 +227,20 @@ struct ItemDetailView: View {
     private func saveContext() {
         do {
             try modelContext.save()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshPodcast(_ item: LibraryItem) async {
+        isRefreshingPodcast = true
+        defer { isRefreshingPodcast = false }
+        do {
+            _ = try await PodcastFeedSyncService(
+                context: modelContext,
+                credentials: services.credentials,
+                refresher: services.metadata.podcastFeeds
+            ).refresh(item)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -766,4 +791,3 @@ private struct MilestoneSection: View {
         }
     }
 }
-
