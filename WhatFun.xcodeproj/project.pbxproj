@@ -21,9 +21,22 @@
 		A10000000000000000000005 /* WhatFunTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhatFunTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A10000000000000000000009 /* Exceptions for "WhatFun" folder in "WhatFun" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Resources/Info.plist,
+			);
+			target = A10000000000000000000010 /* WhatFun */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000007 /* WhatFun */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10000000000000000000009 /* Exceptions for "WhatFun" folder in "WhatFun" target */,
+			);
 			path = WhatFun;
 			sourceTree = "<group>";
 		};
@@ -326,7 +339,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WhatFun/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WhatFun;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -361,7 +375,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WhatFun/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WhatFun;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
