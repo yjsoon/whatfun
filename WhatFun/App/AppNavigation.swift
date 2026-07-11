@@ -18,6 +18,7 @@ enum AppRoute: Hashable, Sendable {
 
 enum AppSheet: Identifiable, Hashable, Sendable {
     case addItem
+    case addItemFor(MediaKind, String)
     case logSession(UUID)
     case editItem(UUID)
     case createList
@@ -26,6 +27,8 @@ enum AppSheet: Identifiable, Hashable, Sendable {
         switch self {
         case .addItem:
             "add-item"
+        case let .addItemFor(kind, query):
+            "add-item-\(kind.rawValue)-\(query)"
         case let .logSession(id):
             "log-session-\(id.uuidString)"
         case let .editItem(id):
@@ -71,5 +74,17 @@ final class AppNavigation {
             searchPath.append(.settings)
         }
     }
-}
 
+    func popCurrent() {
+        switch selectedTab {
+        case .home:
+            if !homePath.isEmpty { homePath.removeLast() }
+        case .library:
+            if !libraryPath.isEmpty { libraryPath.removeLast() }
+        case .lists:
+            if !listsPath.isEmpty { listsPath.removeLast() }
+        case .search:
+            if !searchPath.isEmpty { searchPath.removeLast() }
+        }
+    }
+}

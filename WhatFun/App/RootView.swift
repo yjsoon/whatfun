@@ -10,66 +10,71 @@ struct RootView: View {
             Tab("Home", systemImage: "house", value: .home) {
                 NavigationStack(path: $navigation.homePath) {
                     HomeView()
-                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                        .navigationDestination(for: AppRoute.self, destination: RouteDestination.init)
                 }
             }
 
             Tab("Library", systemImage: "books.vertical", value: .library) {
                 NavigationStack(path: $navigation.libraryPath) {
                     LibraryView()
-                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                        .navigationDestination(for: AppRoute.self, destination: RouteDestination.init)
                 }
             }
 
             Tab("Lists", systemImage: "rectangle.stack", value: .lists) {
                 NavigationStack(path: $navigation.listsPath) {
-                    PlaceholderContent(
-                        title: "Lists",
-                        message: "Manual and smart lists will organize what comes next.",
-                        symbol: "rectangle.stack"
-                    )
-                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                    ListsView()
+                        .navigationDestination(for: AppRoute.self, destination: RouteDestination.init)
                 }
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
                 NavigationStack(path: $navigation.searchPath) {
-                    PlaceholderContent(
-                        title: "Search",
-                        message: "Find your library or add metadata from supported providers.",
-                        symbol: "magnifyingglass"
+                    SearchView(
+                        onOpenItem: { navigation.showItem($0, from: .search) },
+                        onRequestManualAdd: { kind, query in
+                            navigation.presentedSheet = .addItemFor(kind, query)
+                        }
                     )
-                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                    .navigationDestination(for: AppRoute.self, destination: RouteDestination.init)
                 }
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .archiveBackground()
         .environment(navigation)
-    }
-}
-
-private struct PlaceholderContent: View {
-    let title: LocalizedStringKey
-    let message: LocalizedStringKey
-    let symbol: String
-
-    var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: symbol)
-        } description: {
-            Text(message)
+        .sheet(item: $navigation.presentedSheet) { sheet in
+            switch sheet {
+            case .addItem:
+                ItemEditorView()
+            case let .addItemFor(kind, query):
+                ItemEditorView(initialKind: kind, initialTitle: query)
+            case let .logSession(id):
+                SessionEditorView(itemID: id)
+            case let .editItem(id):
+                ItemEditorView(itemID: id)
+            case .createList:
+                ListEditorView()
+            }
         }
-        .navigationTitle(title)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .archiveBackground()
     }
 }
 
-private struct RoutePlaceholder: View {
+private struct RouteDestination: View {
     let route: AppRoute
 
     var body: some View {
+        switch route {
+        case let .item(id):
+            ItemDetailView(itemID: id)
+        case .list:
+            destinationPlaceholder
+        case .settings, .importExport, .recentlyDeleted:
+            destinationPlaceholder
+        }
+    }
+
+    private var destinationPlaceholder: some View {
         ContentUnavailableView(
             title,
             systemImage: symbol,
