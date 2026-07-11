@@ -1,69 +1,109 @@
 import SwiftUI
 
 struct RootView: View {
-    private enum AppTab: Hashable {
-        case home
-        case library
-        case lists
-        case search
-    }
-
-    @State private var selection = AppTab.home
+    @State private var navigation = AppNavigation()
 
     var body: some View {
-        TabView(selection: $selection) {
+        @Bindable var navigation = navigation
+
+        TabView(selection: $navigation.selectedTab) {
             Tab("Home", systemImage: "house", value: .home) {
-                PlaceholderScreen(
-                    title: "WhatFun",
-                    message: "Your current and recent entertainment will live here.",
-                    symbol: "sparkles"
-                )
+                NavigationStack(path: $navigation.homePath) {
+                    PlaceholderContent(
+                        title: "WhatFun",
+                        message: "Your current and recent entertainment will live here.",
+                        symbol: "sparkles"
+                    )
+                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                }
             }
 
             Tab("Library", systemImage: "books.vertical", value: .library) {
-                PlaceholderScreen(
-                    title: "Library",
-                    message: "A cover-first archive across all six media types.",
-                    symbol: "books.vertical"
-                )
+                NavigationStack(path: $navigation.libraryPath) {
+                    PlaceholderContent(
+                        title: "Library",
+                        message: "A cover-first archive across all six media types.",
+                        symbol: "books.vertical"
+                    )
+                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                }
             }
 
             Tab("Lists", systemImage: "rectangle.stack", value: .lists) {
-                PlaceholderScreen(
-                    title: "Lists",
-                    message: "Manual and smart lists will organize what comes next.",
-                    symbol: "rectangle.stack"
-                )
+                NavigationStack(path: $navigation.listsPath) {
+                    PlaceholderContent(
+                        title: "Lists",
+                        message: "Manual and smart lists will organize what comes next.",
+                        symbol: "rectangle.stack"
+                    )
+                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                }
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                PlaceholderScreen(
-                    title: "Search",
-                    message: "Find your library or add metadata from supported providers.",
-                    symbol: "magnifyingglass"
-                )
+                NavigationStack(path: $navigation.searchPath) {
+                    PlaceholderContent(
+                        title: "Search",
+                        message: "Find your library or add metadata from supported providers.",
+                        symbol: "magnifyingglass"
+                    )
+                    .navigationDestination(for: AppRoute.self, destination: RoutePlaceholder.init)
+                }
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .archiveBackground()
+        .environment(navigation)
     }
 }
 
-private struct PlaceholderScreen: View {
+private struct PlaceholderContent: View {
     let title: LocalizedStringKey
     let message: LocalizedStringKey
     let symbol: String
 
     var body: some View {
-        NavigationStack {
-            ContentUnavailableView {
-                Label(title, systemImage: symbol)
-            } description: {
-                Text(message)
-            }
-            .navigationTitle(title)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .archiveBackground()
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(message)
+        }
+        .navigationTitle(title)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .archiveBackground()
+    }
+}
+
+private struct RoutePlaceholder: View {
+    let route: AppRoute
+
+    var body: some View {
+        ContentUnavailableView(
+            title,
+            systemImage: symbol,
+            description: Text("This destination is being connected to the local archive.")
+        )
+        .navigationTitle(title)
+        .archiveBackground()
+    }
+
+    private var title: LocalizedStringKey {
+        switch route {
+        case .item: "Item"
+        case .list: "List"
+        case .settings: "Settings"
+        case .importExport: "Import & Export"
+        case .recentlyDeleted: "Recently Deleted"
+        }
+    }
+
+    private var symbol: String {
+        switch route {
+        case .item: "rectangle.portrait"
+        case .list: "rectangle.stack"
+        case .settings: "gearshape"
+        case .importExport: "arrow.up.arrow.down"
+        case .recentlyDeleted: "trash"
         }
     }
 }
