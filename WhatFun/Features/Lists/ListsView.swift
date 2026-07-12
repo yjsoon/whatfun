@@ -64,6 +64,7 @@ struct ListsView: View {
     @Query(sort: \UserList.sortOrder) private var allLists: [UserList]
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppNavigation.self) private var navigation
     @State private var presentsCreator = false
     @State private var editingList: UserList?
     @State private var pendingDeletion: UserList?
@@ -144,6 +145,12 @@ struct ListsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Create List", systemImage: "plus") {
                     presentsCreator = true
+                }
+            }
+
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Settings", systemImage: "gearshape") {
+                    navigation.showSettings()
                 }
             }
         }

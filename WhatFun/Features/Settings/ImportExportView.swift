@@ -42,10 +42,10 @@ struct ImportExportView: View {
 
     var body: some View {
         Form {
+            legacyImportSection
+            restoreSection
             portableArchiveSection
             fullBackupSection
-            restoreSection
-            legacyImportSection
             localRecoverySection
             privacySection
         }

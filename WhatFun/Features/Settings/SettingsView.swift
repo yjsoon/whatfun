@@ -23,7 +23,7 @@ struct SettingsView: View {
                 NavigationLink(value: AppRoute.importExport) {
                     SettingsRow(
                         title: "Import & Export",
-                        subtitle: "Portable CSV and exact JSON backups",
+                        subtitle: "Sofa and Overcast imports, CSV and JSON backups",
                         symbol: "arrow.up.arrow.down"
                     )
                 }
