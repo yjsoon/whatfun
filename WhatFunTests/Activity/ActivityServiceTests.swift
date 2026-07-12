@@ -32,6 +32,32 @@ struct ActivityServiceTests {
         #expect(item.sessionCount == 1)
     }
 
+    @Test("Logging a session bumps item, cycle, and unit updatedAt for recency ordering")
+    func loggingSessionBumpsUpdatedAt() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let service = ActivityService(context: context)
+        let item = LibraryItem(mediaKind: .tvShow, title: "The Rehearsal")
+        try service.register(item)
+
+        let season = ContentUnit(item: item, kind: .tvSeason, title: "Season 1", sortOrder: 1)
+        season.releaseDate = .distantPast
+        context.insert(season)
+        item.units = [season]
+        let cycle = try service.startCycle(for: item, targetUnit: season)
+
+        let stale = Date(timeIntervalSince1970: 1_700_000_000)
+        item.updatedAt = stale
+        cycle.updatedAt = stale
+        season.updatedAt = stale
+
+        _ = try service.logSession(for: item, targetUnit: season, in: cycle)
+
+        #expect(item.updatedAt > stale)
+        #expect(cycle.updatedAt > stale)
+        #expect(season.updatedAt > stale)
+    }
+
     @Test("A completed item requires an explicit replay decision")
     func explicitReplayChoice() throws {
         let container = try makeContainer()

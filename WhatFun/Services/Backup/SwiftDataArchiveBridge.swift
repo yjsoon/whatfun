@@ -441,7 +441,6 @@ final class SwiftDataArchiveBridge {
                 : [:]
             var referencesByID = mode == .mergeNew ? indexByID(try fetchAll(ExternalReference.self)) : [:]
 
-            var insertedItemIDs: Set<UUID> = []
             var insertedUnitIDs: Set<UUID> = []
             var insertedReferenceIDs: Set<UUID> = []
 
@@ -486,7 +485,6 @@ final class SwiftDataArchiveBridge {
                 }
                 context.insert(item)
                 itemsByID[item.id] = item
-                insertedItemIDs.insert(item.id)
                 report.insertedRecords += 1
             }
 
@@ -1034,8 +1032,10 @@ final class SwiftDataArchiveBridge {
                 })?.id ?? candidates.first(where: { $0.kind == .userImage })?.id ?? candidates.first?.id
             }
 
+            // Re-derive projections without stamping `updatedAt`, so a restore or
+            // merge never disturbs Home's recency order.
             for item in itemsByID.values {
-                ActivityProjection.rebuild(item)
+                ActivityProjection.rebuild(item, touchUpdatedAt: false)
             }
 
             do {
