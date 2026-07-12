@@ -16,25 +16,24 @@ struct HomeView: View {
         items.filter { $0.archivedAt == nil && mediaFilter.includes($0) }
     }
 
-    private var activeItems: [LibraryItem] {
-        visibleItems.filter { item in
-            item.status == .inProgress || item.status == .paused ||
-                (item.mediaKind == .podcast && item.podcastFollowState == .following)
+    private var rails: HomeRailPartition<LibraryItem> {
+        HomeRails.partition(visibleItems, now: .now) { item in
+            HomeRails.Snapshot(
+                status: item.status,
+                isFollowedPodcast: item.mediaKind == .podcast && item.podcastFollowState == .following,
+                earliestPendingReminderFireDate: (item.reminders ?? [])
+                    .filter { $0.state == .pending }
+                    .map(\.fireAt)
+                    .min()
+            )
         }
     }
 
-    private var plannedItems: [LibraryItem] {
-        visibleItems.filter { $0.status == .planned }
-    }
+    private var activeItems: [LibraryItem] { rails.active }
 
-    private var overdueItems: [LibraryItem] {
-        let now = Date.now
-        return visibleItems.filter { item in
-            item.status == .planned && (item.reminders ?? []).contains {
-                $0.state == .pending && $0.fireAt < now
-            }
-        }
-    }
+    private var plannedItems: [LibraryItem] { rails.planned }
+
+    private var overdueItems: [LibraryItem] { rails.overdue }
 
     var body: some View {
         ScrollView {
