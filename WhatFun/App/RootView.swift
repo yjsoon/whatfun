@@ -5,8 +5,11 @@ struct RootView: View {
     @State private var navigation = AppNavigation()
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("backup.last-success") private var lastBackupTimestamp = 0.0
     @AppStorage("backup.last-error") private var lastBackupError = ""
+    @AppStorage("library.grid-style") private var gridStyleRaw = LibraryGridStyle.flow.rawValue
+    @AppStorage("reminders.default-hour") private var defaultReminderHour = 9
 
     var body: some View {
         @Bindable var navigation = navigation
@@ -62,18 +65,28 @@ struct RootView: View {
                 ListEditorView()
             }
         }
-        .task {
-            _ = try? await TrashPurgeService(
-                context: modelContext,
-                credentials: services.credentials,
-                reminders: services.reminders
-            ).purgeExpired()
-            await writeDailyBackupIfNeeded()
+        // Runs on the first active appearance and every later return to the
+        // foreground, so an app resident for weeks keeps writing daily snapshots
+        // rather than only on a cold launch.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard phase == .active else { return }
+            Task { await runDailyMaintenance() }
         }
+    }
+
+    private func runDailyMaintenance() async {
+        // Snapshot first, purge second: the only automatic destructive operation must
+        // never run before today's recovery snapshot is on disk.
+        await DailyMaintenanceSequencer.run(
+            writeRecoverySnapshot: { await writeDailyBackupIfNeeded() },
+            purgeExpiredTrash: { await purgeExpiredTrash() }
+        )
     }
 
     private func writeDailyBackupIfNeeded() async {
         guard services.allowsAutomaticBackups else { return }
+        // Idempotent guard: maintenance now runs on every foreground, but at most one
+        // snapshot is written per calendar day.
         if lastBackupTimestamp > 0,
            Calendar.autoupdatingCurrent.isDateInToday(
                Date(timeIntervalSince1970: lastBackupTimestamp)
@@ -82,23 +95,33 @@ struct RootView: View {
         }
 
         do {
-            let bridge = SwiftDataArchiveBridge(
-                context: modelContext,
-                credentials: services.credentials
+            let coordinator = DurabilityCoordinator(
+                bridge: SwiftDataArchiveBridge(
+                    context: modelContext,
+                    credentials: services.credentials
+                ),
+                dailyStore: try DailyBackupStore.applicationSupport(),
+                generator: DurabilityCoordinator.automaticRecoveryGenerator
             )
-            let snapshot = try await bridge.snapshot(includePrivateFeedSecrets: false)
-            let envelope = FullFidelityArchiveEnvelope(
-                exportedAt: .now,
-                generator: "WhatFun 0.1 automatic recovery",
-                payload: snapshot.payload
+            _ = try await coordinator.writeDailyBackup(
+                preferences: DurabilityCoordinator.backupPreferences(
+                    gridStyle: gridStyleRaw,
+                    defaultReminderHour: defaultReminderHour
+                )
             )
-            let data = try FullFidelityArchiveCodec.encode(envelope)
-            _ = try await DailyBackupStore.applicationSupport().writeValidatedBackup(data)
             lastBackupTimestamp = Date.now.timeIntervalSince1970
             lastBackupError = ""
         } catch {
             lastBackupError = error.localizedDescription
         }
+    }
+
+    private func purgeExpiredTrash() async {
+        _ = try? await TrashPurgeService(
+            context: modelContext,
+            credentials: services.credentials,
+            reminders: services.reminders
+        ).purgeExpired()
     }
 }
 

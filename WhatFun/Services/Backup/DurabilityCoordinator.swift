@@ -5,6 +5,22 @@ import Foundation
 /// Encoding and disk I/O operate only after the semantic snapshot has completed.
 @MainActor
 final class DurabilityCoordinator {
+    /// Generator recorded in unattended recovery snapshots. Single source for the
+    /// automatic daily-backup path so the view layer never re-spells the literal.
+    static let automaticRecoveryGenerator = "WhatFun 0.1 automatic recovery"
+
+    /// App-only preferences that are safe to embed in a backup, keyed by a documented
+    /// stable name. Shared so the automatic and manual paths stay in lockstep.
+    static func backupPreferences(
+        gridStyle: String,
+        defaultReminderHour: Int
+    ) -> [String: String] {
+        [
+            "library.grid-style": gridStyle,
+            "reminders.default-hour": String(defaultReminderHour),
+        ]
+    }
+
     private let bridge: SwiftDataArchiveBridge
     private let dailyStore: DailyBackupStore?
     private let generator: String

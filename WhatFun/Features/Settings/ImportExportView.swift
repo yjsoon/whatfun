@@ -299,13 +299,15 @@ struct ImportExportView: View {
     }
 
     private var archivePreferences: [String: String] {
-        [
-            "library.grid-style": gridStyleRaw,
-            "reminders.default-hour": String(defaultReminderHour),
-        ]
+        DurabilityCoordinator.backupPreferences(
+            gridStyle: gridStyleRaw,
+            defaultReminderHour: defaultReminderHour
+        )
     }
 
-    private func makeCoordinator() throws -> DurabilityCoordinator {
+    private func makeCoordinator(
+        generator: String = "WhatFun 0.1"
+    ) throws -> DurabilityCoordinator {
         let store = try DailyBackupStore.applicationSupport()
         return DurabilityCoordinator(
             bridge: SwiftDataArchiveBridge(
@@ -313,7 +315,7 @@ struct ImportExportView: View {
                 credentials: services.credentials
             ),
             dailyStore: store,
-            generator: "WhatFun 0.1"
+            generator: generator
         )
     }
 
@@ -489,16 +491,10 @@ struct ImportExportView: View {
 
     @discardableResult
     private func writeRedactedDailyBackup() async throws -> URL {
-        let snapshot = try await makeCoordinator().snapshot(includePrivateFeedSecrets: false)
-        let envelope = FullFidelityArchiveEnvelope(
-            exportedAt: .now,
-            generator: "WhatFun 0.1 automatic recovery",
-            payload: snapshot.payload,
-            preferences: archivePreferences
+        let coordinator = try makeCoordinator(
+            generator: DurabilityCoordinator.automaticRecoveryGenerator
         )
-        let data = try FullFidelityArchiveCodec.encode(envelope)
-        let store = try DailyBackupStore.applicationSupport()
-        let url = try await store.writeValidatedBackup(data)
+        let url = try await coordinator.writeDailyBackup(preferences: archivePreferences)
         lastBackupTimestamp = Date.now.timeIntervalSince1970
         lastBackupError = ""
         return url
