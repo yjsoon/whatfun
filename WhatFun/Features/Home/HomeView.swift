@@ -52,7 +52,7 @@ struct HomeView: View {
                         activeSection
                     }
 
-                    if activeItems.isEmpty, !plannedItems.isEmpty {
+                    if !plannedItems.isEmpty {
                         upNextSection
                     }
 
