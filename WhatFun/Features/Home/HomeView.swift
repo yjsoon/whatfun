@@ -71,7 +71,7 @@ struct HomeView: View {
         .archiveBackground()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button("Settings", systemImage: "person.crop.circle") {
+                Button("Settings", systemImage: "gearshape") {
                     navigation.showSettings()
                 }
             }
@@ -108,6 +108,11 @@ struct HomeView: View {
                 navigation.presentedSheet = .addItem
             }
             .buttonStyle(.glassProminent)
+
+            Button("Import from Sofa or Overcast", systemImage: "square.and.arrow.down") {
+                navigation.showImportExport()
+            }
+            .buttonStyle(.glass)
         }
         .frame(maxWidth: .infinity, minHeight: 480)
     }

@@ -76,6 +76,19 @@ final class AppNavigation {
         }
     }
 
+    func showImportExport() {
+        switch selectedTab {
+        case .home:
+            homePath.append(.importExport)
+        case .library:
+            libraryPath.append(.importExport)
+        case .lists:
+            listsPath.append(.importExport)
+        case .search:
+            searchPath.append(.importExport)
+        }
+    }
+
     func popCurrent() {
         switch selectedTab {
         case .home:

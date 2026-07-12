@@ -4,6 +4,7 @@ import UIKit
 
 struct SearchView: View {
     @Environment(AppServices.self) private var services
+    @Environment(AppNavigation.self) private var navigation
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \LibraryItem.updatedAt, order: .reverse) private var libraryItems: [LibraryItem]
 
@@ -52,6 +53,13 @@ struct SearchView: View {
         .searchable(text: $query, prompt: "Titles, creators, and series")
         .searchToolbarBehavior(.minimize)
         .archiveBackground()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Settings", systemImage: "gearshape") {
+                    navigation.showSettings()
+                }
+            }
+        }
         .task(id: searchTaskID) {
             await searchRemoteMetadata()
         }

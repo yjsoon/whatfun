@@ -35,6 +35,11 @@ struct LibraryView: View {
                             navigation.presentedSheet = .addItem
                         }
                         .buttonStyle(.glassProminent)
+
+                        Button("Find with Search", systemImage: "magnifyingglass") {
+                            navigation.selectedTab = .search
+                        }
+                        .buttonStyle(.glass)
                     }
                     .frame(minHeight: 430)
                 } else {
@@ -81,7 +86,7 @@ struct LibraryView: View {
             }
 
             ToolbarItem(placement: .topBarLeading) {
-                Button("Settings", systemImage: "person.crop.circle") {
+                Button("Settings", systemImage: "gearshape") {
                     navigation.showSettings()
                 }
             }

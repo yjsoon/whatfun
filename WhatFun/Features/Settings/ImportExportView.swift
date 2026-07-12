@@ -42,10 +42,10 @@ struct ImportExportView: View {
 
     var body: some View {
         Form {
+            legacyImportSection
             portableArchiveSection
             fullBackupSection
             restoreSection
-            legacyImportSection
             localRecoverySection
             privacySection
         }
@@ -176,7 +176,7 @@ struct ImportExportView: View {
     }
 
     private var restoreSection: some View {
-        Section("Restore") {
+        Section {
             Picker("Restore Behavior", selection: $restorePolicy) {
                 ForEach(RestorePolicy.allCases) { policy in
                     Text(policy.displayName).tag(policy)
@@ -190,6 +190,10 @@ struct ImportExportView: View {
             Button("Import Full JSON Backup", systemImage: "arrow.down.doc") {
                 presentsFullImporter = true
             }
+        } header: {
+            Text("Restore")
+        } footer: {
+            Text("Restores a portable archive or full backup created by WhatFun — see the sections above.")
         }
     }
 
@@ -204,7 +208,7 @@ struct ImportExportView: View {
         } header: {
             Text("Bring Data In")
         } footer: {
-            Text("Sofa, Overcast, and OPML files are staged first. High-confidence rows are selected; ambiguous matches wait for your review.")
+            Text("Export from Sofa’s settings screen or the “All data” download on Overcast’s account page. Sofa, Overcast, and OPML files are staged first. High-confidence rows are selected; ambiguous matches wait for your review.")
         }
     }
 
