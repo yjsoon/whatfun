@@ -178,6 +178,94 @@ struct StagedImportApplierTests {
         #expect(try context.fetchCount(FetchDescriptor<ExternalReference>()) == 0)
     }
 
+    @Test("A path-embedded feed token from an unknown host is stored privately")
+    func pathEmbeddedTokenFeedStaysPrivate() async throws {
+        let container = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let context = container.mainContext
+        let credentials = InMemoryCredentialStore()
+        let tokenURL = "https://example-premium.com/premium/tok_abc123def/feed.rss"
+        let row = podcastSubscriptionRow(rowNumber: 1, title: "Premium Show", feedURL: tokenURL)
+        let batch = StagedImportBatch(
+            source: .opml,
+            sourceFilename: "subscriptions.opml",
+            stagedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            rows: [row]
+        )
+        let service = StagedImportApplier(context: context, credentials: credentials)
+
+        _ = try await service.apply(
+            batch,
+            selection: ImportApplicationSelection(acceptedRowIDs: [row.id])
+        )
+
+        let item = try #require(try context.fetch(FetchDescriptor<LibraryItem>()).first)
+        let reference = try #require(item.externalReferences?.first {
+            $0.providerRaw == "rss" && $0.isActiveFeed
+        })
+        let key = try #require(reference.credentialKeychainID)
+
+        #expect(reference.isPrivateFeed)
+        #expect(reference.canonicalURLString == nil)
+        #expect(reference.externalID.hasPrefix("private."))
+        #expect(!reference.externalID.contains("tok_abc123def"))
+        #expect(await credentials.value(for: key) == tokenURL)
+    }
+
+    @Test("An imported private feed URL never appears in a portable export")
+    func importedPrivateFeedIsRedactedInExports() async throws {
+        let container = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let context = container.mainContext
+        let credentials = InMemoryCredentialStore()
+        let tokenURL = "https://example-premium.com/premium/tok_abc123def/feed.rss"
+        let row = podcastSubscriptionRow(rowNumber: 1, title: "Premium Show", feedURL: tokenURL)
+        let batch = StagedImportBatch(source: .opml, rows: [row])
+        let applier = StagedImportApplier(context: context, credentials: credentials)
+        _ = try await applier.apply(
+            batch,
+            selection: ImportApplicationSelection(acceptedRowIDs: [row.id])
+        )
+
+        let bridge = SwiftDataArchiveBridge(context: context, credentials: credentials)
+        let snapshot = try await bridge.snapshot()
+
+        let plainPayload = try JSONEncoder().encode(snapshot.payload)
+        #expect(!String(decoding: plainPayload, as: UTF8.self).contains("tok_abc123def"))
+
+        let package = try PortableArchiveBuilder.makePackage(
+            payload: snapshot.payload,
+            generator: "WhatFunTests/1"
+        )
+        let combined = package.files.values.compactMap { String(data: $0, encoding: .utf8) }.joined()
+        #expect(!combined.contains("tok_abc123def"))
+        #expect(snapshot.privatePayload?.privateFeedSecrets.first?.feedURL == tokenURL)
+    }
+
+    @Test("A verifiably clean public feed stays public through import")
+    func cleanPublicFeedStaysPublic() async throws {
+        let container = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let context = container.mainContext
+        let publicURL = "https://feeds.megaphone.fm/design-details"
+        let row = podcastSubscriptionRow(rowNumber: 1, title: "Design Details", feedURL: publicURL)
+        let batch = StagedImportBatch(source: .opml, rows: [row])
+        let service = StagedImportApplier(
+            context: context,
+            credentials: InMemoryCredentialStore()
+        )
+
+        _ = try await service.apply(
+            batch,
+            selection: ImportApplicationSelection(acceptedRowIDs: [row.id])
+        )
+
+        let item = try #require(try context.fetch(FetchDescriptor<LibraryItem>()).first)
+        let reference = try #require(item.externalReferences?.first {
+            $0.providerRaw == "rss" && $0.isActiveFeed
+        })
+        #expect(!reference.isPrivateFeed)
+        #expect(reference.canonicalURLString == publicURL)
+        #expect(reference.credentialKeychainID == nil)
+    }
+
     private func mediaRow(
         rowNumber: Int,
         consumedAt: Date,

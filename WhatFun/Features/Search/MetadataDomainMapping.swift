@@ -29,39 +29,6 @@ nonisolated struct MetadataDuplicateKey: Hashable, Sendable {
     }
 }
 
-nonisolated enum PodcastFeedPrivacy: Sendable, Equatable {
-    case publicDirectoryFeed
-    case privateCredential
-
-    static func classify(_ url: URL, discoveredBy provider: MetadataProviderID) -> Self {
-        guard provider == .applePodcasts,
-              url.scheme?.lowercased() == "https",
-              url.user == nil,
-              url.password == nil,
-              !containsSensitiveQuery(in: url)
-        else {
-            // URLs outside the public Apple directory are treated as private by
-            // default. This errs toward Keychain storage instead of accidentally
-            // persisting a premium feed token in SwiftData or an export.
-            return .privateCredential
-        }
-        return .publicDirectoryFeed
-    }
-
-    private static func containsSensitiveQuery(in url: URL) -> Bool {
-        let sensitiveNames: Set<String> = [
-            "access_token", "apikey", "api_key", "auth", "authorization",
-            "code", "key", "password", "secret", "signature", "sig", "token",
-        ]
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return true
-        }
-        return (components.queryItems ?? []).contains {
-            sensitiveNames.contains($0.name.lowercased())
-        }
-    }
-}
-
 nonisolated struct MetadataFacetDraft: Hashable, Sendable {
     let kind: FacetKind
     let name: String

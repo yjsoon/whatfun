@@ -367,7 +367,8 @@ final class StagedImportApplier {
             report.createdUnits += 1
         }
 
-        let identifierIsSensitive = URL(string: sourceIdentifier).map(isSensitiveURL) ?? false
+        let identifierIsSensitive = URL(string: sourceIdentifier)
+            .map { PodcastFeedPrivacy.containsEmbeddedCredential(in: $0) } ?? false
         episode.episodeGUIDHash = guidHash
         episode.episodeGUID = feedIsPrivate || identifierIsSensitive ? nil : sourceIdentifier
         episode.title = proposal.episodeTitle
@@ -955,9 +956,7 @@ final class StagedImportApplier {
         credentialMutations: inout [CredentialMutation],
         report: inout ImportApplicationReport
     ) async throws -> Bool {
-        guard let url = URL(string: rawValue),
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-              url.host()?.isEmpty == false else {
+        guard let url = PodcastFeedPrivacy.validatedFeedURL(from: rawValue) else {
             report.warnings.append(ImportApplicationWarning(
                 rowID: rowID,
                 message: "The podcast feed URL was invalid and was not saved."
@@ -965,7 +964,7 @@ final class StagedImportApplier {
             return false
         }
 
-        let isPrivate = isSensitiveURL(url)
+        let isPrivate = PodcastFeedPrivacy.classify(untrustedFeed: url).isPrivate
         let reference = (item.externalReferences ?? []).first(where: {
             $0.providerRaw == "rss" && $0.isActiveFeed
         }) ?? ExternalReference(
@@ -1149,23 +1148,9 @@ final class StagedImportApplier {
     }
 
     private func safePublicURL(_ rawValue: String) -> String? {
-        guard let url = URL(string: rawValue),
-              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-              url.host()?.isEmpty == false,
-              !isSensitiveURL(url) else { return nil }
+        guard let url = PodcastFeedPrivacy.validatedFeedURL(from: rawValue),
+              !PodcastFeedPrivacy.containsEmbeddedCredential(in: url) else { return nil }
         return rawValue
-    }
-
-    private func isSensitiveURL(_ url: URL) -> Bool {
-        if url.user != nil || url.password != nil { return true }
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return true }
-        let sensitiveNames: Set<String> = [
-            "access_token", "apikey", "api_key", "auth", "authorization", "code",
-            "key", "password", "secret", "signature", "sig", "token",
-        ]
-        return (components.queryItems ?? []).contains {
-            sensitiveNames.contains($0.name.lowercased())
-        }
     }
 
     private func opaqueHash(_ value: String) -> String {
@@ -1192,9 +1177,4 @@ final class StagedImportApplier {
         }
         return nil
     }
-}
-
-private nonisolated struct CredentialMutation: Sendable {
-    var key: String
-    var previousValue: String?
 }
