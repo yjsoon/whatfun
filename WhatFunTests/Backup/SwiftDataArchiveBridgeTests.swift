@@ -49,7 +49,7 @@ struct SwiftDataArchiveBridgeTests {
         #expect(report.restoredPrivateFeeds == 1)
         let context = destinationContainer.mainContext
         let item = try #require(try context.fetch(FetchDescriptor<LibraryItem>()).first)
-        let unit = try #require(try context.fetch(FetchDescriptor<ContentUnit>()).first)
+        let unit = try #require(try context.fetch(FetchDescriptor<ContentUnit>()).first { $0.id == fixture.unitID })
         let cycle = try #require(try context.fetch(FetchDescriptor<ConsumptionCycle>()).first)
         let session = try #require(try context.fetch(FetchDescriptor<ConsumptionSession>()).first)
         let event = try #require(try context.fetch(FetchDescriptor<ActivityEvent>()).first)
@@ -108,7 +108,12 @@ struct SwiftDataArchiveBridgeTests {
 
         let archivedItem = try #require(snapshot.payload.items.first { $0.id == fixture.itemID })
         let archivedUnit = try #require(snapshot.payload.units.first { $0.id == fixture.unitID })
+        let archivedEpisode = try #require(snapshot.payload.units.first { $0.id == fixture.episodeUnitID })
         let archivedCycle = try #require(snapshot.payload.cycles.first { $0.id == fixture.cycleID })
+        #expect(archivedItem.updatedAt == timestamp.addingTimeInterval(1))
+        #expect(archivedCycle.updatedAt == timestamp.addingTimeInterval(2))
+        #expect(archivedUnit.updatedAt == timestamp.addingTimeInterval(3))
+        #expect(archivedEpisode.updatedAt == timestamp.addingTimeInterval(4))
 
         let destinationContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
         let destinationBridge = SwiftDataArchiveBridge(
@@ -123,17 +128,22 @@ struct SwiftDataArchiveBridgeTests {
 
         let context = destinationContainer.mainContext
         let item = try #require(try context.fetch(FetchDescriptor<LibraryItem>()).first)
-        let unit = try #require(try context.fetch(FetchDescriptor<ContentUnit>()).first)
+        let units = try context.fetch(FetchDescriptor<ContentUnit>())
+        let unit = try #require(units.first { $0.id == fixture.unitID })
+        let episode = try #require(units.first { $0.id == fixture.episodeUnitID })
         let cycle = try #require(try context.fetch(FetchDescriptor<ConsumptionCycle>()).first)
 
         #expect(item.updatedAt == archivedItem.updatedAt)
         #expect(unit.updatedAt == archivedUnit.updatedAt)
+        #expect(episode.updatedAt == archivedEpisode.updatedAt)
+        #expect(episode.parentUnitID == fixture.unitID)
         #expect(cycle.updatedAt == archivedCycle.updatedAt)
 
         // Snapshot -> restore -> snapshot must reproduce the same timestamps end to end.
         let roundTrip = try await destinationBridge.snapshot()
         #expect(roundTrip.payload.items.first { $0.id == fixture.itemID }?.updatedAt == archivedItem.updatedAt)
         #expect(roundTrip.payload.units.first { $0.id == fixture.unitID }?.updatedAt == archivedUnit.updatedAt)
+        #expect(roundTrip.payload.units.first { $0.id == fixture.episodeUnitID }?.updatedAt == archivedEpisode.updatedAt)
         #expect(roundTrip.payload.cycles.first { $0.id == fixture.cycleID }?.updatedAt == archivedCycle.updatedAt)
     }
 
@@ -180,6 +190,99 @@ struct SwiftDataArchiveBridgeTests {
         #expect(item.updatedAt == itemUpdatedAt)
         #expect(unit.updatedAt == unitUpdatedAt)
         #expect(cycle.updatedAt == cycleUpdatedAt)
+    }
+
+    @Test("Merging new history onto an existing item re-derives projections without touching updatedAt")
+    func mergeAttachesNewHistoryToExistingItem() async throws {
+        let sourceContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let sourceCredentials = InMemoryCredentialStore()
+        let fixture = try await makeSourceGraph(
+            in: sourceContainer.mainContext,
+            credentials: sourceCredentials
+        )
+        let sourceBridge = SwiftDataArchiveBridge(
+            context: sourceContainer.mainContext,
+            credentials: sourceCredentials
+        )
+        let firstSnapshot = try await sourceBridge.snapshot()
+
+        let destinationContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let destinationBridge = SwiftDataArchiveBridge(
+            context: destinationContainer.mainContext,
+            credentials: InMemoryCredentialStore()
+        )
+        _ = try await destinationBridge.restore(
+            payload: firstSnapshot.payload,
+            privatePayload: firstSnapshot.privatePayload,
+            mode: .replaceAll
+        )
+
+        // Continue the source item's history with a repeat cycle and a session.
+        let sourceContext = sourceContainer.mainContext
+        let sourceItem = try #require(
+            try sourceContext.fetch(FetchDescriptor<LibraryItem>()).first { $0.id == fixture.itemID }
+        )
+        let repeatCycle = ConsumptionCycle(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000001")!,
+            item: sourceItem,
+            kind: .repeatConsumption,
+            ordinal: 2,
+            repeatOfCycleID: fixture.cycleID,
+            createdAt: timestamp.addingTimeInterval(7_200)
+        )
+        sourceContext.insert(repeatCycle)
+        sourceItem.cycles = (sourceItem.cycles ?? []) + [repeatCycle]
+        let startEvent = ActivityEvent(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+            item: sourceItem,
+            cycle: repeatCycle,
+            scope: .item,
+            kind: .started,
+            fromStatus: .completed,
+            toStatus: .inProgress,
+            effectiveAt: timestamp.addingTimeInterval(7_200),
+            timeZoneIdentifier: "Asia/Singapore",
+            source: .manual
+        )
+        startEvent.recordedAt = timestamp.addingTimeInterval(7_200)
+        sourceContext.insert(startEvent)
+        sourceItem.activityEvents = (sourceItem.activityEvents ?? []) + [startEvent]
+        repeatCycle.activityEvents = [startEvent]
+        let laterSession = ConsumptionSession(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000003")!,
+            cycle: repeatCycle,
+            occurredAt: timestamp.addingTimeInterval(7_500),
+            timeZoneIdentifier: "Asia/Singapore",
+            source: .manual
+        )
+        laterSession.createdAt = timestamp.addingTimeInterval(7_500)
+        laterSession.updatedAt = timestamp.addingTimeInterval(7_500)
+        sourceContext.insert(laterSession)
+        repeatCycle.sessions = [laterSession]
+        ActivityProjection.rebuild(sourceItem, now: timestamp.addingTimeInterval(8_000))
+        sourceItem.updatedAt = timestamp.addingTimeInterval(100)
+        try sourceContext.save()
+        let secondSnapshot = try await sourceBridge.snapshot()
+
+        let report = try await destinationBridge.restore(
+            payload: secondSnapshot.payload,
+            privatePayload: secondSnapshot.privatePayload,
+            mode: .mergeNew
+        )
+
+        let context = destinationContainer.mainContext
+        let merged = try #require(
+            try context.fetch(FetchDescriptor<LibraryItem>()).first { $0.id == fixture.itemID }
+        )
+        #expect(report.insertedRecords == 3)
+        // The archived item record carries a newer updatedAt, yet merge never
+        // rewrites the existing record: recency stays as the user left it.
+        #expect(merged.updatedAt == timestamp.addingTimeInterval(1))
+        #expect(merged.sessionCount == 2)
+        #expect(merged.cycleCount == 2)
+        #expect(merged.repeatCount == 1)
+        #expect(merged.status == .inProgress)
+        #expect(merged.lastSessionAt == timestamp.addingTimeInterval(7_500))
     }
 
     @Test("Full JSON authenticates private data before replace-all mutates SwiftData")
@@ -303,7 +406,21 @@ struct SwiftDataArchiveBridgeTests {
         unit.releaseDate = timestamp
         unit.ratingHalfSteps = 9
         context.insert(unit)
-        item.units = [unit]
+
+        let episode = ContentUnit(
+            id: ids.episodeUnitID,
+            item: item,
+            kind: .tvEpisode,
+            title: "Episode 1",
+            sortOrder: 1,
+            parent: unit,
+            createdAt: timestamp
+        )
+        episode.episodeNumber = 1
+        episode.releaseDate = timestamp
+        context.insert(episode)
+        unit.children = [episode]
+        item.units = [unit, episode]
 
         let cycle = ConsumptionCycle(
             id: ids.cycleID,
@@ -410,6 +527,12 @@ struct SwiftDataArchiveBridgeTests {
         await credentials.set(ids.privateFeedURL, for: ids.sourceCredentialKey)
 
         ActivityProjection.rebuild(item, now: timestamp.addingTimeInterval(3_600))
+        // Distinct stale timestamps: a restore that rewrote or cross-copied any
+        // updatedAt would break the round-trip assertions unambiguously.
+        item.updatedAt = timestamp.addingTimeInterval(1)
+        cycle.updatedAt = timestamp.addingTimeInterval(2)
+        unit.updatedAt = timestamp.addingTimeInterval(3)
+        episode.updatedAt = timestamp.addingTimeInterval(4)
         try context.save()
         return ids
     }
@@ -427,6 +550,7 @@ private nonisolated struct FixtureIDs: Sendable {
     let listID = UUID(uuidString: "20000000-0000-0000-0000-000000000009")!
     let listMembershipID = UUID(uuidString: "20000000-0000-0000-0000-00000000000A")!
     let referenceID = UUID(uuidString: "20000000-0000-0000-0000-00000000000B")!
+    let episodeUnitID = UUID(uuidString: "20000000-0000-0000-0000-00000000000C")!
     let sourceCredentialKey = "source-private-feed-key"
     let privateFeedURL = "https://private.example/feed?token=private"
 }
