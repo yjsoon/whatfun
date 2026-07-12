@@ -28,14 +28,24 @@ struct ImportReviewView: View {
             List {
                 summarySection
 
-                ForEach($batch.rows) { $row in
-                    ImportReviewRow(
-                        row: $row,
-                        isSelected: selectionBinding(for: row.id),
-                        targetItemID: targetBinding(for: row.id),
-                        isSelectable: row.proposal.isActionable
-                    )
-                    .listRowBackground(WhatFunTheme.raisedBackground)
+                ForEach(ImportReviewLogic.groups(for: batch.rows)) { group in
+                    Section {
+                        ForEach(group.rowIDs, id: \.self) { rowID in
+                            if let index = batch.rows.firstIndex(where: { $0.id == rowID }) {
+                                ImportReviewRow(
+                                    row: $batch.rows[index],
+                                    isSelected: selectionBinding(for: rowID),
+                                    targetItemID: targetBinding(for: rowID),
+                                    isSelectable: batch.rows[index].isImportable
+                                )
+                                .listRowBackground(WhatFunTheme.raisedBackground)
+                            }
+                        }
+                    } header: {
+                        sectionHeader(for: group)
+                    } footer: {
+                        sectionFooter(for: group)
+                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -81,9 +91,8 @@ struct ImportReviewView: View {
 
     private var summarySection: some View {
         Section {
-            LabeledContent("Ready", value: batch.rows.filter { $0.disposition == .ready }.count, format: .number)
-            LabeledContent("Needs Review", value: batch.rows.filter { $0.disposition == .needsReview }.count, format: .number)
-            LabeledContent("Manual or Unresolved", value: batch.rows.filter { $0.disposition == .manualEntry }.count, format: .number)
+            LabeledContent("Rows", value: batch.rows.count, format: .number)
+            LabeledContent("Selected", value: selectedRowIDs.count, format: .number)
 
             if !batch.warnings.isEmpty {
                 ForEach(batch.warnings) { warning in
@@ -96,6 +105,54 @@ struct ImportReviewView: View {
             Text(batch.sourceFilename ?? sourceName)
         } footer: {
             Text("High-confidence rows are selected automatically. Ambiguous rows stay off until you choose them; nothing is silently matched.")
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(for group: ImportReviewLogic.Group) -> some View {
+        HStack {
+            Text(group.disposition.reviewSectionTitle)
+            Spacer()
+            Text(group.rowIDs.count, format: .number)
+                .monospacedDigit()
+            if group.disposition.allowsBulkSelection {
+                Button(isEverythingSelected(in: group) ? "Deselect all" : "Select all") {
+                    toggleSelectAll(for: group)
+                }
+                .textCase(nil)
+                .font(.footnote.weight(.semibold))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionFooter(for group: ImportReviewLogic.Group) -> some View {
+        switch group.disposition {
+        case .needsReview:
+            Text("Confirm each row before importing; selecting all accepts them as they stand.")
+        case .manualEntry:
+            Text("These rows need entering by hand and will be skipped.")
+        case .skipped:
+            Text("These rows will be skipped.")
+        case .ready:
+            EmptyView()
+        }
+    }
+
+    private func rows(in group: ImportReviewLogic.Group) -> [StagedImportRow] {
+        batch.rows.filter { $0.disposition == group.disposition }
+    }
+
+    private func isEverythingSelected(in group: ImportReviewLogic.Group) -> Bool {
+        ImportReviewLogic.allImportableSelected(in: rows(in: group), selection: selectedRowIDs)
+    }
+
+    private func toggleSelectAll(for group: ImportReviewLogic.Group) {
+        let groupRows = rows(in: group)
+        if ImportReviewLogic.allImportableSelected(in: groupRows, selection: selectedRowIDs) {
+            selectedRowIDs = ImportReviewLogic.deselectingAll(in: groupRows, from: selectedRowIDs)
+        } else {
+            selectedRowIDs = ImportReviewLogic.selectingAll(in: groupRows, from: selectedRowIDs)
         }
     }
 
@@ -176,18 +233,24 @@ private struct ImportReviewRow: View {
                     .disabled(!isSelectable)
             }
 
-            HStack {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(ImportReviewLogic.confidencePhrase(for: row))
+                        .font(.subheadline)
+                        .foregroundStyle(WhatFunTheme.secondaryInk)
+                    Spacer()
+                    Text(row.confidence, format: .percent.precision(.fractionLength(0)))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(WhatFunTheme.secondaryInk.opacity(0.6))
+                        .accessibilityHidden(true)
+                }
                 ProgressView(value: row.confidence)
                     .tint(confidenceColor)
-                    .accessibilityHidden(true)
-                Text(row.confidence, format: .percent.precision(.fractionLength(0)))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(WhatFunTheme.secondaryInk)
                     .accessibilityHidden(true)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Match confidence")
-            .accessibilityValue(Text(row.confidence, format: .percent.precision(.fractionLength(0))))
+            .accessibilityValue(Text(ImportReviewLogic.confidencePhrase(for: row)))
 
             if !isSelectable {
                 Label("This unresolved row will be skipped.", systemImage: "pencil.and.list.clipboard")
@@ -280,11 +343,6 @@ private extension ImportProposal {
     var needsMediaKind: Bool {
         guard case let .mediaItem(value) = self else { return false }
         return value.mediaKind == nil
-    }
-
-    var isActionable: Bool {
-        if case .unresolved = self { return false }
-        return true
     }
 }
 
