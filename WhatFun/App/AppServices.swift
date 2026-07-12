@@ -8,6 +8,9 @@ final class AppServices {
     @ObservationIgnored let reminders: any ReminderScheduling
     @ObservationIgnored let metadata: MetadataServiceBundle
     @ObservationIgnored let allowsAutomaticBackups: Bool
+    /// Shared gate so automatic maintenance and restore/import mutations never
+    /// interleave on the MainActor model context.
+    @ObservationIgnored let maintenance = MaintenanceScheduler()
 
     init(
         artwork: any ArtworkLoading,

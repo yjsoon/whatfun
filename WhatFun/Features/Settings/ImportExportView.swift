@@ -107,10 +107,12 @@ struct ImportExportView: View {
         }
         .sheet(item: $stagedImport, onDismiss: { stagedImport = nil }) { batch in
             ImportReviewView(batch: batch) { batch, selection in
-                try await StagedImportApplier(
-                    context: modelContext,
-                    credentials: services.credentials
-                ).apply(batch, selection: selection)
+                try await services.maintenance.withRestoreGate {
+                    try await StagedImportApplier(
+                        context: modelContext,
+                        credentials: services.credentials
+                    ).apply(batch, selection: selection)
+                }
             }
         }
         .confirmationDialog(
@@ -299,13 +301,15 @@ struct ImportExportView: View {
     }
 
     private var archivePreferences: [String: String] {
-        [
-            "library.grid-style": gridStyleRaw,
-            "reminders.default-hour": String(defaultReminderHour),
-        ]
+        DurabilityCoordinator.backupPreferences(
+            gridStyle: gridStyleRaw,
+            defaultReminderHour: defaultReminderHour
+        )
     }
 
-    private func makeCoordinator() throws -> DurabilityCoordinator {
+    private func makeCoordinator(
+        generator: String = "WhatFun 0.1"
+    ) throws -> DurabilityCoordinator {
         let store = try DailyBackupStore.applicationSupport()
         return DurabilityCoordinator(
             bridge: SwiftDataArchiveBridge(
@@ -313,7 +317,7 @@ struct ImportExportView: View {
                 credentials: services.credentials
             ),
             dailyStore: store,
-            generator: "WhatFun 0.1"
+            generator: generator
         )
     }
 
@@ -437,28 +441,34 @@ struct ImportExportView: View {
     private func performRestore(_ request: PendingRestore) async {
         pendingRestore = nil
         await performWork {
-            let coordinator = try makeCoordinator()
             let oldNotificationIdentifiers = request.mode == .replaceAll
                 ? try modelContext.fetch(FetchDescriptor<StartReminder>()).map(\.notificationIdentifier)
                 : []
-            if request.mode == .replaceAll {
-                _ = try await writeRedactedDailyBackup()
-            }
+            // Hold the maintenance gate for the whole mutation: a purge that saves
+            // the context mid-restore would commit a half-restored graph that
+            // rollback can no longer undo.
+            let report = try await services.maintenance.withRestoreGate {
+                let coordinator = try makeCoordinator()
+                if request.mode == .replaceAll {
+                    _ = try await writeRedactedDailyBackup()
+                }
 
-            let report: ArchiveRestoreReport
-            switch request.source {
-            case let .portable(package):
-                report = try await coordinator.restorePortablePackage(package, mode: request.mode)
-            case let .full(data, key):
-                report = try await coordinator.restoreFullBackup(
-                    data,
-                    encryptionKey: key,
-                    mode: request.mode
-                )
-            }
-            if request.mode == .replaceAll,
-               case let .full(data, _) = request.source {
-                try restorePreferences(from: data)
+                let report: ArchiveRestoreReport
+                switch request.source {
+                case let .portable(package):
+                    report = try await coordinator.restorePortablePackage(package, mode: request.mode)
+                case let .full(data, key):
+                    report = try await coordinator.restoreFullBackup(
+                        data,
+                        encryptionKey: key,
+                        mode: request.mode
+                    )
+                }
+                if request.mode == .replaceAll,
+                   case let .full(data, _) = request.source {
+                    try restorePreferences(from: data)
+                }
+                return report
             }
             let reminderResult = await reschedulePendingReminders(
                 cancelling: oldNotificationIdentifiers
@@ -489,16 +499,10 @@ struct ImportExportView: View {
 
     @discardableResult
     private func writeRedactedDailyBackup() async throws -> URL {
-        let snapshot = try await makeCoordinator().snapshot(includePrivateFeedSecrets: false)
-        let envelope = FullFidelityArchiveEnvelope(
-            exportedAt: .now,
-            generator: "WhatFun 0.1 automatic recovery",
-            payload: snapshot.payload,
-            preferences: archivePreferences
+        let coordinator = try makeCoordinator(
+            generator: DurabilityCoordinator.automaticRecoveryGenerator
         )
-        let data = try FullFidelityArchiveCodec.encode(envelope)
-        let store = try DailyBackupStore.applicationSupport()
-        let url = try await store.writeValidatedBackup(data)
+        let url = try await coordinator.writeDailyBackup(preferences: archivePreferences)
         lastBackupTimestamp = Date.now.timeIntervalSince1970
         lastBackupError = ""
         return url

@@ -5,6 +5,7 @@ struct RootView: View {
     @State private var navigation = AppNavigation()
     @Environment(\.modelContext) private var modelContext
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("backup.last-success") private var lastBackupTimestamp = 0.0
     @AppStorage("backup.last-error") private var lastBackupError = ""
 
@@ -62,42 +63,90 @@ struct RootView: View {
                 ListEditorView()
             }
         }
-        .task {
-            _ = try? await TrashPurgeService(
-                context: modelContext,
-                credentials: services.credentials,
-                reminders: services.reminders
-            ).purgeExpired()
-            await writeDailyBackupIfNeeded()
+        // Runs on the first active appearance and every later return to the
+        // foreground, so an app resident for weeks keeps writing daily snapshots
+        // rather than only on a cold launch. The scheduler coalesces rapid
+        // inactive/active bounces into one run and drops the request entirely
+        // while a restore holds the gate.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard phase == .active else { return }
+            services.maintenance.scheduleMaintenance { await runDailyMaintenance() }
         }
     }
 
-    private func writeDailyBackupIfNeeded() async {
-        guard services.allowsAutomaticBackups else { return }
+    private func runDailyMaintenance() async {
+        // Snapshot first, purge second — and only if the snapshot landed: the
+        // sequencer skips the destructive purge whenever today's recovery
+        // snapshot could not be written.
+        await DailyMaintenanceSequencer.run(
+            writeRecoverySnapshot: { await ensureDailySnapshot() },
+            purgeExpiredTrash: { await purgeExpiredTrashIfNeeded() }
+        )
+    }
+
+    /// Returns true when today's safety net is in place: either a snapshot was
+    /// just written, one already exists for today, or automatic backups are
+    /// deliberately disabled (previews) and there is no snapshot regime to gate on.
+    private func ensureDailySnapshot() async -> Bool {
+        guard services.allowsAutomaticBackups else { return true }
+        // Idempotent guard: maintenance runs on every foreground, but at most one
+        // snapshot is written per calendar day.
         if lastBackupTimestamp > 0,
-           Calendar.autoupdatingCurrent.isDateInToday(
+           Calendar.current.isDateInToday(
                Date(timeIntervalSince1970: lastBackupTimestamp)
            ) {
+            return true
+        }
+
+        do {
+            // Preferences are read straight from UserDefaults so changing them
+            // does not re-render the root TabView via @AppStorage.
+            let defaults = UserDefaults.standard
+            let gridStyle = defaults.string(forKey: "library.grid-style")
+                ?? LibraryGridStyle.flow.rawValue
+            let reminderHour = defaults.object(forKey: "reminders.default-hour") as? Int ?? 9
+            let coordinator = DurabilityCoordinator(
+                bridge: SwiftDataArchiveBridge(
+                    context: modelContext,
+                    credentials: services.credentials
+                ),
+                dailyStore: try DailyBackupStore.applicationSupport(),
+                generator: DurabilityCoordinator.automaticRecoveryGenerator
+            )
+            _ = try await coordinator.writeDailyBackup(
+                preferences: DurabilityCoordinator.backupPreferences(
+                    gridStyle: gridStyle,
+                    defaultReminderHour: reminderHour
+                )
+            )
+            lastBackupTimestamp = Date.now.timeIntervalSince1970
+            lastBackupError = ""
+            return true
+        } catch {
+            lastBackupError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func purgeExpiredTrashIfNeeded() async {
+        // Purge shares the once-per-day cadence: after a successful run it stays
+        // quiet until tomorrow, avoiding a full-table fetch on every foreground.
+        let defaults = UserDefaults.standard
+        let lastPurge = defaults.double(forKey: "maintenance.last-purge")
+        if lastPurge > 0,
+           Calendar.current.isDateInToday(Date(timeIntervalSince1970: lastPurge)) {
             return
         }
 
         do {
-            let bridge = SwiftDataArchiveBridge(
+            _ = try await TrashPurgeService(
                 context: modelContext,
-                credentials: services.credentials
-            )
-            let snapshot = try await bridge.snapshot(includePrivateFeedSecrets: false)
-            let envelope = FullFidelityArchiveEnvelope(
-                exportedAt: .now,
-                generator: "WhatFun 0.1 automatic recovery",
-                payload: snapshot.payload
-            )
-            let data = try FullFidelityArchiveCodec.encode(envelope)
-            _ = try await DailyBackupStore.applicationSupport().writeValidatedBackup(data)
-            lastBackupTimestamp = Date.now.timeIntervalSince1970
-            lastBackupError = ""
+                credentials: services.credentials,
+                reminders: services.reminders
+            ).purgeExpired()
+            defaults.set(Date.now.timeIntervalSince1970, forKey: "maintenance.last-purge")
         } catch {
-            lastBackupError = error.localizedDescription
+            // Deferred to the next foreground; the trash grace window absorbs the delay.
         }
     }
 }
