@@ -444,6 +444,9 @@ final class SwiftDataArchiveBridge {
             var insertedItemIDs: Set<UUID> = []
             var insertedUnitIDs: Set<UUID> = []
             var insertedReferenceIDs: Set<UUID> = []
+            // Items whose projections must be re-derived: newly inserted ones plus
+            // existing items that a merge attached new units/cycles/sessions/events to.
+            var affectedItemIDs: Set<UUID> = []
 
             for record in payload.items {
                 if itemsByID[record.id] != nil {
@@ -487,6 +490,7 @@ final class SwiftDataArchiveBridge {
                 context.insert(item)
                 itemsByID[item.id] = item
                 insertedItemIDs.insert(item.id)
+                affectedItemIDs.insert(item.id)
                 report.insertedRecords += 1
             }
 
@@ -581,6 +585,7 @@ final class SwiftDataArchiveBridge {
                 item.units = appending(unit, to: item.units, id: \.id)
                 unitsByID[unit.id] = unit
                 insertedUnitIDs.insert(unit.id)
+                affectedItemIDs.insert(item.id)
                 report.insertedRecords += 1
             }
 
@@ -623,6 +628,7 @@ final class SwiftDataArchiveBridge {
                 item.cycles = appending(cycle, to: item.cycles, id: \.id)
                 target?.cycles = appending(cycle, to: target?.cycles, id: \.id)
                 cyclesByID[cycle.id] = cycle
+                affectedItemIDs.insert(item.id)
                 report.insertedRecords += 1
             }
 
@@ -674,6 +680,7 @@ final class SwiftDataArchiveBridge {
                 cycle.sessions = appending(session, to: cycle.sessions, id: \.id)
                 target?.sessions = appending(session, to: target?.sessions, id: \.id)
                 sessionsByID[session.id] = session
+                affectedItemIDs.insert(cycle.rootItemID)
                 report.insertedRecords += 1
             }
 
@@ -709,6 +716,7 @@ final class SwiftDataArchiveBridge {
                 cycle?.activityEvents = appending(event, to: cycle?.activityEvents, id: \.id)
                 unit?.activityEvents = appending(event, to: unit?.activityEvents, id: \.id)
                 eventsByID[event.id] = event
+                affectedItemIDs.insert(item.id)
                 report.insertedRecords += 1
             }
 
@@ -1034,8 +1042,11 @@ final class SwiftDataArchiveBridge {
                 })?.id ?? candidates.first(where: { $0.kind == .userImage })?.id ?? candidates.first?.id
             }
 
-            for item in itemsByID.values {
-                ActivityProjection.rebuild(item)
+            // Re-derive only the touched items, and preserve their archived
+            // `updatedAt` so a restore or merge never disturbs Home's recency order.
+            for id in affectedItemIDs {
+                guard let item = itemsByID[id] else { continue }
+                ActivityProjection.rebuild(item, touchUpdatedAt: false)
             }
 
             do {

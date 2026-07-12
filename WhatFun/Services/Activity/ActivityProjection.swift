@@ -45,18 +45,20 @@ enum ActivityProjection {
         }.count
     }
 
-    static func rebuild(_ item: LibraryItem, now: Date = .now) {
+    // `touchUpdatedAt` lets history-preserving callers (backup restore) re-derive
+    // projections without overwriting the archived `updatedAt`, which Home orders by.
+    static func rebuild(_ item: LibraryItem, now: Date = .now, touchUpdatedAt: Bool = true) {
         let units = (item.units ?? []).filter { $0.deletedAt == nil }
         let cycles = (item.cycles ?? []).filter { $0.deletedAt == nil }
         let events = item.activityEvents ?? []
 
         for cycle in cycles {
-            rebuild(cycle, events: events)
+            rebuild(cycle, events: events, touchUpdatedAt: touchUpdatedAt)
         }
 
         // Direct episode/issue state first, then aggregate seasons/volumes.
         for unit in units {
-            rebuild(unit, events: events)
+            rebuild(unit, events: events, touchUpdatedAt: touchUpdatedAt)
         }
         for unit in units where !(unit.children ?? []).isEmpty {
             aggregateChildren(into: unit, now: now)
@@ -143,10 +145,12 @@ enum ActivityProjection {
                 ? units.filter { $0.unitKind == .tvSeason }.compactMap(\.ratingHalfSteps)
                 : []
         )
-        item.updatedAt = .now
+        if touchUpdatedAt {
+            item.updatedAt = .now
+        }
     }
 
-    static func rebuild(_ cycle: ConsumptionCycle, events: [ActivityEvent]) {
+    static func rebuild(_ cycle: ConsumptionCycle, events: [ActivityEvent], touchUpdatedAt: Bool = true) {
         let sessions = (cycle.sessions ?? []).filter { $0.deletedAt == nil }
         let cycleEvents = events.filter { $0.cycleID == cycle.id }
         cycle.sessionCount = sessions.count
@@ -163,10 +167,12 @@ enum ActivityProjection {
             hasSessions: !sessions.isEmpty,
             fallback: .planned
         )
-        cycle.updatedAt = .now
+        if touchUpdatedAt {
+            cycle.updatedAt = .now
+        }
     }
 
-    static func rebuild(_ unit: ContentUnit, events: [ActivityEvent]) {
+    static func rebuild(_ unit: ContentUnit, events: [ActivityEvent], touchUpdatedAt: Bool = true) {
         let sessions = (unit.sessions ?? []).filter { $0.deletedAt == nil }
         let unitEvents = events.filter { $0.targetUnitID == unit.id }
         unit.sessionCount = sessions.count
@@ -183,7 +189,9 @@ enum ActivityProjection {
             hasSessions: !sessions.isEmpty,
             fallback: .planned
         )
-        unit.updatedAt = .now
+        if touchUpdatedAt {
+            unit.updatedAt = .now
+        }
     }
 
     private static func aggregateChildren(into unit: ContentUnit, now: Date) {

@@ -32,6 +32,21 @@ struct ActivityServiceTests {
         #expect(item.sessionCount == 1)
     }
 
+    @Test("Logging a session bumps the item's updatedAt for recency ordering")
+    func loggingSessionBumpsUpdatedAt() throws {
+        let container = try makeContainer()
+        let service = ActivityService(context: container.mainContext)
+        let item = LibraryItem(mediaKind: .movie, title: "Past Lives")
+        try service.register(item)
+
+        let stale = Date(timeIntervalSince1970: 1_700_000_000)
+        item.updatedAt = stale
+
+        _ = try service.logSession(for: item)
+
+        #expect(item.updatedAt > stale)
+    }
+
     @Test("A completed item requires an explicit replay decision")
     func explicitReplayChoice() throws {
         let container = try makeContainer()

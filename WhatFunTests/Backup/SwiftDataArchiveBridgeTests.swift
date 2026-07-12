@@ -92,6 +92,96 @@ struct SwiftDataArchiveBridgeTests {
         #expect(reference.credentialKeychainID == beforeMergeKey)
     }
 
+    @Test("Restore preserves archived updatedAt on items, cycles, and units")
+    func restorePreservesUpdatedAt() async throws {
+        let sourceContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let sourceCredentials = InMemoryCredentialStore()
+        let fixture = try await makeSourceGraph(
+            in: sourceContainer.mainContext,
+            credentials: sourceCredentials
+        )
+        let sourceBridge = SwiftDataArchiveBridge(
+            context: sourceContainer.mainContext,
+            credentials: sourceCredentials
+        )
+        let snapshot = try await sourceBridge.snapshot()
+
+        let archivedItem = try #require(snapshot.payload.items.first { $0.id == fixture.itemID })
+        let archivedUnit = try #require(snapshot.payload.units.first { $0.id == fixture.unitID })
+        let archivedCycle = try #require(snapshot.payload.cycles.first { $0.id == fixture.cycleID })
+
+        let destinationContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let destinationBridge = SwiftDataArchiveBridge(
+            context: destinationContainer.mainContext,
+            credentials: InMemoryCredentialStore()
+        )
+        _ = try await destinationBridge.restore(
+            payload: snapshot.payload,
+            privatePayload: snapshot.privatePayload,
+            mode: .replaceAll
+        )
+
+        let context = destinationContainer.mainContext
+        let item = try #require(try context.fetch(FetchDescriptor<LibraryItem>()).first)
+        let unit = try #require(try context.fetch(FetchDescriptor<ContentUnit>()).first)
+        let cycle = try #require(try context.fetch(FetchDescriptor<ConsumptionCycle>()).first)
+
+        #expect(item.updatedAt == archivedItem.updatedAt)
+        #expect(unit.updatedAt == archivedUnit.updatedAt)
+        #expect(cycle.updatedAt == archivedCycle.updatedAt)
+
+        // Snapshot -> restore -> snapshot must reproduce the same timestamps end to end.
+        let roundTrip = try await destinationBridge.snapshot()
+        #expect(roundTrip.payload.items.first { $0.id == fixture.itemID }?.updatedAt == archivedItem.updatedAt)
+        #expect(roundTrip.payload.units.first { $0.id == fixture.unitID }?.updatedAt == archivedUnit.updatedAt)
+        #expect(roundTrip.payload.cycles.first { $0.id == fixture.cycleID }?.updatedAt == archivedCycle.updatedAt)
+    }
+
+    @Test("Merging an already-present archive leaves existing updatedAt untouched")
+    func mergePreservesExistingUpdatedAt() async throws {
+        let sourceContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let sourceCredentials = InMemoryCredentialStore()
+        _ = try await makeSourceGraph(
+            in: sourceContainer.mainContext,
+            credentials: sourceCredentials
+        )
+        let sourceBridge = SwiftDataArchiveBridge(
+            context: sourceContainer.mainContext,
+            credentials: sourceCredentials
+        )
+        let snapshot = try await sourceBridge.snapshot()
+
+        let destinationContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let destinationBridge = SwiftDataArchiveBridge(
+            context: destinationContainer.mainContext,
+            credentials: InMemoryCredentialStore()
+        )
+        _ = try await destinationBridge.restore(
+            payload: snapshot.payload,
+            privatePayload: snapshot.privatePayload,
+            mode: .replaceAll
+        )
+
+        let context = destinationContainer.mainContext
+        let item = try #require(try context.fetch(FetchDescriptor<LibraryItem>()).first)
+        let unit = try #require(try context.fetch(FetchDescriptor<ContentUnit>()).first)
+        let cycle = try #require(try context.fetch(FetchDescriptor<ConsumptionCycle>()).first)
+        let itemUpdatedAt = item.updatedAt
+        let unitUpdatedAt = unit.updatedAt
+        let cycleUpdatedAt = cycle.updatedAt
+
+        let report = try await destinationBridge.restore(
+            payload: snapshot.payload,
+            privatePayload: snapshot.privatePayload,
+            mode: .mergeNew
+        )
+
+        #expect(report.insertedRecords == 0)
+        #expect(item.updatedAt == itemUpdatedAt)
+        #expect(unit.updatedAt == unitUpdatedAt)
+        #expect(cycle.updatedAt == cycleUpdatedAt)
+    }
+
     @Test("Full JSON authenticates private data before replace-all mutates SwiftData")
     func fullBackupCoordinator() async throws {
         let sourceContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)
