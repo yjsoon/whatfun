@@ -10,22 +10,27 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
     )
 
     private let httpClient: any HTTPClient
-    private let readAccessToken: String
+    private let credential: MetadataCredentialSource
 
     var availability: MetadataProviderAvailability {
+        let readAccessToken = credential.currentToken()
         if readAccessToken.metadataNilIfBlank == nil || readAccessToken.hasPrefix("YOUR_") {
-            .credentialRequired(
-                instructions: "Add a TMDB API read-access token in Config.swift.",
+            return .credentialRequired(
+                instructions: "Add a TMDB read-access token in Settings → Metadata.",
                 setupURL: URL(string: "https://www.themoviedb.org/settings/api")
             )
         } else {
-            .available
+            return .available
         }
     }
 
-    init(httpClient: any HTTPClient, readAccessToken: String) {
+    init(httpClient: any HTTPClient, credential: MetadataCredentialSource) {
         self.httpClient = httpClient
-        self.readAccessToken = readAccessToken
+        self.credential = credential
+    }
+
+    init(httpClient: any HTTPClient, readAccessToken: String) {
+        self.init(httpClient: httpClient, credential: .constant(readAccessToken))
     }
 
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
@@ -136,7 +141,7 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        request.setValue("Bearer \(readAccessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(credential.currentToken())", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }

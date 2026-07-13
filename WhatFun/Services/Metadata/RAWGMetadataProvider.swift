@@ -10,22 +10,27 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
     )
 
     private let httpClient: any HTTPClient
-    private let apiKey: String
+    private let credential: MetadataCredentialSource
 
     var availability: MetadataProviderAvailability {
+        let apiKey = credential.currentToken()
         if apiKey.metadataNilIfBlank == nil || apiKey.hasPrefix("YOUR_") {
-            .credentialRequired(
-                instructions: "Add a RAWG API key in Config.swift.",
+            return .credentialRequired(
+                instructions: "Add a RAWG API key in Settings → Metadata.",
                 setupURL: URL(string: "https://rawg.io/apidocs")
             )
         } else {
-            .available
+            return .available
         }
     }
 
-    init(httpClient: any HTTPClient, apiKey: String) {
+    init(httpClient: any HTTPClient, credential: MetadataCredentialSource) {
         self.httpClient = httpClient
-        self.apiKey = apiKey
+        self.credential = credential
+    }
+
+    init(httpClient: any HTTPClient, apiKey: String) {
+        self.init(httpClient: httpClient, credential: .constant(apiKey))
     }
 
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
@@ -34,7 +39,7 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
             makeRequest(
                 path: "/api/games",
                 queryItems: [
-                    URLQueryItem(name: "key", value: apiKey),
+                    URLQueryItem(name: "key", value: credential.currentToken()),
                     URLQueryItem(name: "search", value: request.trimmedQuery),
                     URLQueryItem(name: "search_precise", value: "true"),
                     URLQueryItem(name: "page", value: String(request.page)),
@@ -57,7 +62,7 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
         let response = try await httpClient.send(
             makeRequest(
                 path: "/api/games/\(result.id.externalID)",
-                queryItems: [URLQueryItem(name: "key", value: apiKey)]
+                queryItems: [URLQueryItem(name: "key", value: credential.currentToken())]
             )
         )
         let payload = try decode(RAWGDetailsResponse.self, from: response.data)

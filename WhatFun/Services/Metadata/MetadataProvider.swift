@@ -88,10 +88,18 @@ nonisolated struct MetadataServiceBundle: Sendable {
 /// requests themselves run through nonisolated Sendable clients.
 enum MetadataServiceFactory {
     static func live(httpClient: any HTTPClient = URLSessionHTTPClient()) -> MetadataServiceBundle {
+        // Keys the user saves in Settings live in the Keychain and win over the
+        // developer fallback in Config.swift. Both are re-read on every request,
+        // so a newly saved key takes effect without restarting the app.
+        let keychainReader = KeychainSynchronousReader()
         let providers: [any MetadataProvider] = [
             TMDBMetadataProvider(
                 httpClient: httpClient,
-                readAccessToken: Config.tmdbReadAccessToken
+                credential: MetadataCredentialSource(
+                    reader: keychainReader,
+                    key: .tmdbReadAccessToken,
+                    configValue: Config.tmdbReadAccessToken
+                )
             ),
             OpenLibraryMetadataProvider(
                 httpClient: httpClient,
@@ -100,7 +108,11 @@ enum MetadataServiceFactory {
             ),
             RAWGMetadataProvider(
                 httpClient: httpClient,
-                apiKey: Config.rawgAPIKey
+                credential: MetadataCredentialSource(
+                    reader: keychainReader,
+                    key: .rawgAPIKey,
+                    configValue: Config.rawgAPIKey
+                )
             ),
             ApplePodcastMetadataProvider(httpClient: httpClient),
         ]

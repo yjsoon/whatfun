@@ -22,9 +22,13 @@ protocol CredentialStoring: Sendable {
 }
 
 actor KeychainCredentialStore: CredentialStoring {
+    /// Shared Keychain service for all WhatFun credentials. The synchronous
+    /// metadata-key reader uses the same service so saved keys resolve at request time.
+    nonisolated static let defaultService = "com.yjsoon.whatfun.private-feeds"
+
     private let service: String
 
-    init(service: String = "com.yjsoon.whatfun.private-feeds") {
+    init(service: String = KeychainCredentialStore.defaultService) {
         self.service = service
     }
 
