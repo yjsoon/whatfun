@@ -13,7 +13,18 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
     private let credential: MetadataCredentialSource
 
     var availability: MetadataProviderAvailability {
-        let apiKey = credential.currentToken()
+        availability(for: credential.currentToken())
+    }
+
+    private func availability(
+        for resolution: MetadataCredentialResolution
+    ) -> MetadataProviderAvailability {
+        guard let apiKey = resolution.token else {
+            return .credentialRequired(
+                instructions: "WhatFun could not read your saved RAWG key from the Keychain. Unlock your device, then try again.",
+                setupURL: nil
+            )
+        }
         if apiKey.metadataNilIfBlank == nil || apiKey.hasPrefix("YOUR_") {
             return .credentialRequired(
                 instructions: "Add a RAWG API key in Settings → Metadata.",
@@ -22,6 +33,18 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
         } else {
             return .available
         }
+    }
+
+    /// The resolution is made once per operation, so a missing token here means
+    /// validation already threw. Kept as a guard rather than a force-unwrap.
+    private func requireToken(_ resolution: MetadataCredentialResolution) throws -> String {
+        guard let token = resolution.token else {
+            throw MetadataProviderError.missingCredential(
+                provider: id,
+                instructions: "WhatFun could not read your saved RAWG key from the Keychain."
+            )
+        }
+        return token
     }
 
     init(httpClient: any HTTPClient, credential: MetadataCredentialSource) {
@@ -33,13 +56,16 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
         self.init(httpClient: httpClient, credential: .constant(apiKey))
     }
 
+    @concurrent
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
-        try validate(request)
+        let resolution = credential.currentToken()
+        try validate(request, availability: availability(for: resolution))
+        let apiKey = try requireToken(resolution)
         let response = try await httpClient.send(
             makeRequest(
                 path: "/api/games",
                 queryItems: [
-                    URLQueryItem(name: "key", value: credential.currentToken()),
+                    URLQueryItem(name: "key", value: apiKey),
                     URLQueryItem(name: "search", value: request.trimmedQuery),
                     URLQueryItem(name: "search_precise", value: "true"),
                     URLQueryItem(name: "page", value: String(request.page)),
@@ -57,12 +83,15 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
         )
     }
 
+    @concurrent
     func details(for result: MetadataSearchResult) async throws -> MetadataItemDetails {
-        try validateOwnership(of: result)
+        let resolution = credential.currentToken()
+        try validateOwnership(of: result, availability: availability(for: resolution))
+        let apiKey = try requireToken(resolution)
         let response = try await httpClient.send(
             makeRequest(
                 path: "/api/games/\(result.id.externalID)",
-                queryItems: [URLQueryItem(name: "key", value: credential.currentToken())]
+                queryItems: [URLQueryItem(name: "key", value: apiKey)]
             )
         )
         let payload = try decode(RAWGDetailsResponse.self, from: response.data)

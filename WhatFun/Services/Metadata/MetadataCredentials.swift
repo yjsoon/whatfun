@@ -36,11 +36,31 @@ nonisolated enum MetadataCredentialResolver {
     }
 }
 
-/// Synchronous, read-only Keychain access used at request time so a saved key
-/// takes effect without restarting the app. Writes still go through the async
+/// The outcome of resolving a credential. A Keychain that fails for any reason
+/// other than "no such item" must not silently fall through to the Config
+/// fallback: that would bill requests to the developer's key, and would claim a
+/// key is missing while one is in fact saved.
+nonisolated enum MetadataCredentialResolution: Sendable, Equatable {
+    case token(String)
+    case keychainUnavailable(OSStatus)
+
+    var token: String? {
+        switch self {
+        case let .token(token): token
+        case .keychainUnavailable: nil
+        }
+    }
+}
+
+/// Synchronous, read-only Keychain access used when a request is built, so a
+/// saved key takes effect without restarting the app. Writes go through the async
 /// `KeychainCredentialStore`; both share the same Keychain service.
+///
+/// Deliberately keyed by `MetadataCredentialKey` rather than a free-form string:
+/// this reader structurally cannot be pointed at a private podcast feed secret.
 nonisolated protocol SynchronousCredentialReading: Sendable {
-    func value(for account: String) -> String?
+    /// Returns nil when no item is stored; throws when the Keychain itself fails.
+    func value(for key: MetadataCredentialKey) throws -> String?
 }
 
 nonisolated struct KeychainSynchronousReader: SynchronousCredentialReading {
@@ -50,58 +70,85 @@ nonisolated struct KeychainSynchronousReader: SynchronousCredentialReading {
         self.service = service
     }
 
-    func value(for account: String) -> String? {
+    func value(for key: MetadataCredentialKey) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: key.account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let value = String(data: data, encoding: .utf8)
-        else { return nil }
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw CredentialStoreError.unexpectedStatus(status)
+        }
+        guard let data = result as? Data, let value = String(data: data, encoding: .utf8) else {
+            throw CredentialStoreError.invalidEncoding
+        }
         return value
     }
 }
 
-/// Resolves a single provider credential on demand: reads the user's saved
-/// Keychain value if present, otherwise falls back to `Config.swift`.
+/// Resolves a single provider credential on demand: the user's saved Keychain
+/// value if present, otherwise the `Config.swift` fallback.
 nonisolated struct MetadataCredentialSource: Sendable {
     private let reader: any SynchronousCredentialReading
-    private let account: String
+    private let key: MetadataCredentialKey
     private let configValue: String
 
     init(reader: any SynchronousCredentialReading, key: MetadataCredentialKey, configValue: String) {
         self.reader = reader
-        self.account = key.account
+        self.key = key
         self.configValue = configValue
     }
 
-    func currentToken() -> String {
-        MetadataCredentialResolver.resolve(stored: reader.value(for: account), config: configValue)
+    func currentToken() -> MetadataCredentialResolution {
+        do {
+            let stored = try reader.value(for: key)
+            return .token(MetadataCredentialResolver.resolve(stored: stored, config: configValue))
+        } catch let error as CredentialStoreError {
+            return switch error {
+            case let .unexpectedStatus(status): .keychainUnavailable(status)
+            case .invalidEncoding: .keychainUnavailable(errSecDecode)
+            }
+        } catch {
+            return .keychainUnavailable(errSecInternalError)
+        }
     }
 
     /// A fixed token with no Keychain lookup, used for tests and previews.
     static func constant(_ value: String) -> MetadataCredentialSource {
-        MetadataCredentialSource(reader: EmptyCredentialReader(), key: .tmdbReadAccessToken, configValue: value)
+        MetadataCredentialSource(
+            reader: EmptyCredentialReader(),
+            key: .tmdbReadAccessToken,
+            configValue: value
+        )
     }
 }
 
 private nonisolated struct EmptyCredentialReader: SynchronousCredentialReading {
-    func value(for account: String) -> String? { nil }
+    func value(for key: MetadataCredentialKey) -> String? { nil }
 }
 
-/// Masks a stored credential for display, revealing only the final characters
-/// so the user can confirm which key is in place without exposing the secret.
+/// Masks a stored credential for display, revealing only the final characters so
+/// the user can confirm which key is in place without exposing the secret. Short
+/// keys are masked entirely: revealing 4 characters of a 6-character key would
+/// give away most of it.
 nonisolated func maskedCredential(_ value: String, visibleSuffix: Int = 4) -> String {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return "" }
-    guard trimmed.count > visibleSuffix else {
-        return String(repeating: "•", count: max(trimmed.count, 1))
+    guard trimmed.count >= visibleSuffix * 2 else {
+        return String(repeating: "•", count: trimmed.count)
     }
     return "••••" + trimmed.suffix(visibleSuffix)
+}
+
+/// Removing or replacing a key must not leave behind a cached response from a
+/// request that carried it. Metadata requests now use a cacheless session, but a
+/// build from before that fix may have written entries into the shared on-disk
+/// cache, so clear it when a key changes.
+nonisolated func purgeCredentialBearingResponseCache() {
+    URLCache.shared.removeAllCachedResponses()
 }

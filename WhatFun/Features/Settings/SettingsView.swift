@@ -130,7 +130,9 @@ private struct MetadataKeyRow: View {
     let guidance: LocalizedStringKey
 
     @Environment(AppServices.self) private var services
-    @State private var storedValue: String?
+    /// Only ever the masked form. The plaintext key is read, masked, and dropped:
+    /// it never comes to rest in view state.
+    @State private var maskedKey: String?
     @State private var isEditing = false
 
     var body: some View {
@@ -146,25 +148,26 @@ private struct MetadataKeyRow: View {
             }
         }
         .task(id: isEditing) {
-            storedValue = try? await services.credentials.value(for: credentialKey.account)
+            let stored = try? await services.credentials.value(for: credentialKey.account)
+            maskedKey = stored.flatMap { $0.isEmpty ? nil : maskedCredential($0) }
         }
         .sheet(isPresented: $isEditing) {
             MetadataKeyEditorView(
                 credentialKey: credentialKey,
                 hasConfigFallback: hasConfigFallback,
                 guidance: guidance,
-                storedValue: storedValue
+                maskedKey: maskedKey
             )
         }
     }
 
     private var isConfigured: Bool {
-        storedValue?.isEmpty == false || hasConfigFallback
+        maskedKey != nil || hasConfigFallback
     }
 
     private var statusText: String {
-        if let storedValue, !storedValue.isEmpty {
-            return maskedCredential(storedValue)
+        if let maskedKey {
+            return maskedKey
         }
         return hasConfigFallback ? String(localized: "Developer key") : String(localized: "Add Key")
     }
@@ -178,20 +181,24 @@ private struct MetadataKeyEditorView: View {
     let credentialKey: MetadataCredentialKey
     let hasConfigFallback: Bool
     let guidance: LocalizedStringKey
-    let storedValue: String?
+    /// The already-masked saved key, or nil when none is saved. The editor never
+    /// needs the plaintext: it only writes a new one or removes the existing one.
+    let maskedKey: String?
 
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     @State private var draftKey = ""
     @State private var errorMessage: String?
+    @State private var isWorking = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField(storedValue == nil ? "Paste key" : "Paste replacement key", text: $draftKey)
+                    SecureField(maskedKey == nil ? "Paste key" : "Paste replacement key", text: $draftKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .disabled(isWorking)
                 } header: {
                     Text("\(credentialKey.displayName) Key")
                 } footer: {
@@ -205,12 +212,13 @@ private struct MetadataKeyEditorView: View {
                     }
                 }
 
-                if let storedValue, !storedValue.isEmpty {
+                if let maskedKey {
                     Section {
-                        LabeledContent("Saved key", value: maskedCredential(storedValue))
+                        LabeledContent("Saved key", value: maskedKey)
                         Button("Remove Key", role: .destructive) {
                             Task { await removeKey() }
                         }
+                        .disabled(isWorking)
                     } footer: {
                         if hasConfigFallback {
                             Text("Removing the saved key falls back to the key built into this copy of the app.")
@@ -225,12 +233,13 @@ private struct MetadataKeyEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isWorking)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         Task { await saveKey() }
                     }
-                    .disabled(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isWorking || draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
@@ -238,9 +247,13 @@ private struct MetadataKeyEditorView: View {
 
     private func saveKey() async {
         let trimmed = draftKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
         do {
             try await services.credentials.set(trimmed, for: credentialKey.account)
+            draftKey = ""
+            purgeCredentialBearingResponseCache()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
@@ -248,8 +261,12 @@ private struct MetadataKeyEditorView: View {
     }
 
     private func removeKey() async {
+        guard !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
         do {
             try await services.credentials.removeValue(for: credentialKey.account)
+            purgeCredentialBearingResponseCache()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

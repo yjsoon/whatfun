@@ -13,7 +13,18 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
     private let credential: MetadataCredentialSource
 
     var availability: MetadataProviderAvailability {
-        let readAccessToken = credential.currentToken()
+        availability(for: credential.currentToken())
+    }
+
+    private func availability(
+        for resolution: MetadataCredentialResolution
+    ) -> MetadataProviderAvailability {
+        guard let readAccessToken = resolution.token else {
+            return .credentialRequired(
+                instructions: "WhatFun could not read your saved TMDB key from the Keychain. Unlock your device, then try again.",
+                setupURL: nil
+            )
+        }
         if readAccessToken.metadataNilIfBlank == nil || readAccessToken.hasPrefix("YOUR_") {
             return .credentialRequired(
                 instructions: "Add a TMDB read-access token in Settings → Metadata.",
@@ -33,8 +44,11 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
         self.init(httpClient: httpClient, credential: .constant(readAccessToken))
     }
 
+    @concurrent
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
-        try validate(request)
+        let resolution = credential.currentToken()
+        try validate(request, availability: availability(for: resolution))
+        let readAccessToken = try requireToken(resolution)
         let path = request.mediaType == .movie ? "/3/search/movie" : "/3/search/tv"
         var queryItems = [
             URLQueryItem(name: "query", value: request.trimmedQuery),
@@ -45,7 +59,9 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
             queryItems.append(URLQueryItem(name: "language", value: languageCode))
         }
 
-        let response = try await httpClient.send(makeRequest(path: path, queryItems: queryItems))
+        let response = try await httpClient.send(
+            makeRequest(path: path, queryItems: queryItems, readAccessToken: readAccessToken)
+        )
         let payload = try decode(TMDBSearchResponse.self, from: response.data)
         let results = payload.results.map { item in
             makeResult(from: item, mediaType: request.mediaType)
@@ -59,14 +75,18 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
         )
     }
 
+    @concurrent
     func details(for result: MetadataSearchResult) async throws -> MetadataItemDetails {
-        try validateOwnership(of: result)
+        let resolution = credential.currentToken()
+        try validateOwnership(of: result, availability: availability(for: resolution))
+        let readAccessToken = try requireToken(resolution)
         let segment = result.mediaType == .movie ? "movie" : "tv"
         let queryItems = [URLQueryItem(name: "append_to_response", value: "credits")]
         let response = try await httpClient.send(
             makeRequest(
                 path: "/3/\(segment)/\(result.id.externalID)",
-                queryItems: queryItems
+                queryItems: queryItems,
+                readAccessToken: readAccessToken
             )
         )
         let payload = try decode(TMDBDetailsResponse.self, from: response.data)
@@ -129,7 +149,23 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
         )
     }
 
-    private func makeRequest(path: String, queryItems: [URLQueryItem]) throws -> URLRequest {
+    /// The resolution is made once per operation, so a missing token here means
+    /// validation already threw. Kept as a guard rather than a force-unwrap.
+    private func requireToken(_ resolution: MetadataCredentialResolution) throws -> String {
+        guard let token = resolution.token else {
+            throw MetadataProviderError.missingCredential(
+                provider: id,
+                instructions: "WhatFun could not read your saved TMDB key from the Keychain."
+            )
+        }
+        return token
+    }
+
+    private func makeRequest(
+        path: String,
+        queryItems: [URLQueryItem],
+        readAccessToken: String
+    ) throws -> URLRequest {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "api.themoviedb.org"
@@ -141,7 +177,7 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
-        request.setValue("Bearer \(credential.currentToken())", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(readAccessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }
