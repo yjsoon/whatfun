@@ -10,26 +10,57 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
     )
 
     private let httpClient: any HTTPClient
-    private let apiKey: String
+    private let credential: MetadataCredentialSource
 
     var availability: MetadataProviderAvailability {
+        availability(for: credential.currentToken())
+    }
+
+    private func availability(
+        for resolution: MetadataCredentialResolution
+    ) -> MetadataProviderAvailability {
+        guard let apiKey = resolution.token else {
+            return .credentialRequired(
+                instructions: "WhatFun could not read your saved RAWG key from the Keychain. Unlock your device, then try again.",
+                setupURL: nil
+            )
+        }
         if apiKey.metadataNilIfBlank == nil || apiKey.hasPrefix("YOUR_") {
-            .credentialRequired(
-                instructions: "Add a RAWG API key in Config.swift.",
+            return .credentialRequired(
+                instructions: "Add a RAWG API key in Settings → Metadata.",
                 setupURL: URL(string: "https://rawg.io/apidocs")
             )
         } else {
-            .available
+            return .available
         }
     }
 
-    init(httpClient: any HTTPClient, apiKey: String) {
-        self.httpClient = httpClient
-        self.apiKey = apiKey
+    /// The resolution is made once per operation, so a missing token here means
+    /// validation already threw. Kept as a guard rather than a force-unwrap.
+    private func requireToken(_ resolution: MetadataCredentialResolution) throws -> String {
+        guard let token = resolution.token else {
+            throw MetadataProviderError.missingCredential(
+                provider: id,
+                instructions: "WhatFun could not read your saved RAWG key from the Keychain."
+            )
+        }
+        return token
     }
 
+    init(httpClient: any HTTPClient, credential: MetadataCredentialSource) {
+        self.httpClient = httpClient
+        self.credential = credential
+    }
+
+    init(httpClient: any HTTPClient, apiKey: String) {
+        self.init(httpClient: httpClient, credential: .constant(apiKey))
+    }
+
+    @concurrent
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
-        try validate(request)
+        let resolution = credential.currentToken()
+        try validate(request, availability: availability(for: resolution))
+        let apiKey = try requireToken(resolution)
         let response = try await httpClient.send(
             makeRequest(
                 path: "/api/games",
@@ -52,8 +83,11 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
         )
     }
 
+    @concurrent
     func details(for result: MetadataSearchResult) async throws -> MetadataItemDetails {
-        try validateOwnership(of: result)
+        let resolution = credential.currentToken()
+        try validateOwnership(of: result, availability: availability(for: resolution))
+        let apiKey = try requireToken(resolution)
         let response = try await httpClient.send(
             makeRequest(
                 path: "/api/games/\(result.id.externalID)",

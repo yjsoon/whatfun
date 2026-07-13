@@ -12,6 +12,16 @@ nonisolated protocol MetadataProvider: Sendable {
 
 nonisolated extension MetadataProvider {
     func validate(_ request: MetadataSearchRequest) throws {
+        try validate(request, availability: availability)
+    }
+
+    /// Credential-backed providers resolve their key once per operation and pass
+    /// the resulting availability in, so a single request never reads the
+    /// Keychain twice (which would also be a time-of-check/time-of-use gap).
+    func validate(
+        _ request: MetadataSearchRequest,
+        availability: MetadataProviderAvailability
+    ) throws {
         guard !request.trimmedQuery.isEmpty else {
             throw MetadataProviderError.emptyQuery
         }
@@ -21,21 +31,27 @@ nonisolated extension MetadataProvider {
                 mediaType: request.mediaType
             )
         }
-        if case let .credentialRequired(instructions, _) = availability {
-            throw MetadataProviderError.missingCredential(
-                provider: id,
-                instructions: instructions
-            )
-        }
+        try validateCredential(availability)
     }
 
     func validateOwnership(of result: MetadataSearchResult) throws {
+        try validateOwnership(of: result, availability: availability)
+    }
+
+    func validateOwnership(
+        of result: MetadataSearchResult,
+        availability: MetadataProviderAvailability
+    ) throws {
         guard result.id.provider == id, supportedMediaTypes.contains(result.mediaType) else {
             throw MetadataProviderError.unsupportedMediaType(
                 provider: id,
                 mediaType: result.mediaType
             )
         }
+        try validateCredential(availability)
+    }
+
+    func validateCredential(_ availability: MetadataProviderAvailability) throws {
         if case let .credentialRequired(instructions, _) = availability {
             throw MetadataProviderError.missingCredential(
                 provider: id,
@@ -83,15 +99,28 @@ nonisolated struct MetadataServiceBundle: Sendable {
     let podcastFeeds: any PodcastFeedRefreshing
 }
 
-/// The only bridge from Config into the Sendable networking layer. Because the
-/// project uses MainActor default isolation, construction happens on MainActor;
-/// requests themselves run through nonisolated Sendable clients.
+/// The only bridge from Config into the Sendable networking layer. Construction
+/// happens on MainActor (the project defaults to MainActor isolation); the
+/// credential-bearing request work is marked `@concurrent` so it runs off it.
+///
+/// Every request this bundle makes can carry a secret — a metadata API key, or a
+/// private podcast feed URL — so all of them go through a cacheless session.
 enum MetadataServiceFactory {
-    static func live(httpClient: any HTTPClient = URLSessionHTTPClient()) -> MetadataServiceBundle {
+    static func live(
+        httpClient: any HTTPClient = URLSessionHTTPClient.secretless()
+    ) -> MetadataServiceBundle {
+        // Keys the user saves in Settings live in the Keychain and win over the
+        // developer fallback in Config.swift. Both are re-read on every request,
+        // so a newly saved key takes effect without restarting the app.
+        let keychainReader = KeychainSynchronousReader()
         let providers: [any MetadataProvider] = [
             TMDBMetadataProvider(
                 httpClient: httpClient,
-                readAccessToken: Config.tmdbReadAccessToken
+                credential: MetadataCredentialSource(
+                    reader: keychainReader,
+                    key: .tmdbReadAccessToken,
+                    configValue: Config.tmdbReadAccessToken
+                )
             ),
             OpenLibraryMetadataProvider(
                 httpClient: httpClient,
@@ -100,7 +129,11 @@ enum MetadataServiceFactory {
             ),
             RAWGMetadataProvider(
                 httpClient: httpClient,
-                apiKey: Config.rawgAPIKey
+                credential: MetadataCredentialSource(
+                    reader: keychainReader,
+                    key: .rawgAPIKey,
+                    configValue: Config.rawgAPIKey
+                )
             ),
             ApplePodcastMetadataProvider(httpClient: httpClient),
         ]

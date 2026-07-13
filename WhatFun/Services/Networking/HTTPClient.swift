@@ -108,6 +108,26 @@ nonisolated struct URLSessionHTTPClient: HTTPClient {
         self.session = session
     }
 
+    /// A client for requests that carry secrets: metadata API keys (RAWG puts its
+    /// key in the query string, TMDB sends a bearer token) and private podcast feed
+    /// URLs. The default shared session writes responses — including the request URL
+    /// and its headers — into an on-disk URLCache, which would leave a plaintext copy
+    /// of the secret outside the Keychain that removing the key would not erase.
+    /// An ephemeral configuration with no URLCache keeps nothing on disk.
+    static func secretless() -> URLSessionHTTPClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSessionHTTPClient(session: URLSession(configuration: configuration))
+    }
+
+    /// Whether this client can persist a response to disk. Used by tests to assert
+    /// that credential-bearing requests never touch a durable cache.
+    var persistsResponsesToDisk: Bool {
+        guard let cache = session.configuration.urlCache else { return false }
+        return cache.diskCapacity > 0
+    }
+
     func send(
         _ request: URLRequest,
         accepting statusPolicy: HTTPStatusPolicy
