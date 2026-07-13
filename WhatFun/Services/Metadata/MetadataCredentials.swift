@@ -145,6 +145,50 @@ nonisolated func maskedCredential(_ value: String, visibleSuffix: Int = 4) -> St
     return "••••" + trimmed.suffix(visibleSuffix)
 }
 
+/// What Settings should show for a provider key. A Keychain read that fails is
+/// its own state: reporting it as "no key saved" would tell the user nothing is
+/// stored while search simultaneously fails because the saved key cannot be read.
+nonisolated enum MetadataKeyStatus: Sendable, Equatable {
+    /// A key is saved. The associated value is already masked.
+    case saved(masked: String)
+    /// No saved key, but the build carries a usable Config fallback.
+    case developerFallback
+    /// No key anywhere: the provider cannot search.
+    case missing
+    /// The Keychain itself failed (locked device, decode error). We cannot say
+    /// whether a key is saved.
+    case unreadable
+
+    var maskedKey: String? {
+        if case let .saved(masked) = self { return masked }
+        return nil
+    }
+
+    var isUsable: Bool {
+        switch self {
+        case .saved, .developerFallback: true
+        case .missing, .unreadable: false
+        }
+    }
+}
+
+/// Pure derivation of the Settings row state. `stored` mirrors `CredentialStoring`:
+/// success(nil) means no such item, failure means the Keychain itself failed.
+nonisolated func metadataKeyStatus(
+    stored: Result<String?, any Error>,
+    hasConfigFallback: Bool
+) -> MetadataKeyStatus {
+    switch stored {
+    case .failure:
+        return .unreadable
+    case let .success(value):
+        guard let value = value?.metadataNilIfBlank else {
+            return hasConfigFallback ? .developerFallback : .missing
+        }
+        return .saved(masked: maskedCredential(value))
+    }
+}
+
 /// Removing or replacing a key must not leave behind a cached response from a
 /// request that carried it. Metadata requests now use a cacheless session, but a
 /// build from before that fix may have written entries into the shared on-disk

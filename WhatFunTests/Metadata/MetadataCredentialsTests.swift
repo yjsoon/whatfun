@@ -150,6 +150,48 @@ struct MetadataCredentialsTests {
         #expect(source.currentToken() == .token("YOUR_RAWG_API_KEY"))
     }
 
+    @Test("Settings shows a saved key as masked, never as plaintext")
+    func settingsStatusForSavedKey() {
+        let status = metadataKeyStatus(
+            stored: .success("abcdef123456"),
+            hasConfigFallback: false
+        )
+        #expect(status == .saved(masked: "••••3456"))
+        #expect(status.maskedKey == "••••3456")
+        #expect(status.isUsable)
+    }
+
+    @Test("Settings distinguishes no saved key from a Config fallback")
+    func settingsStatusWithoutSavedKey() {
+        #expect(
+            metadataKeyStatus(stored: .success(nil), hasConfigFallback: true) == .developerFallback
+        )
+        #expect(
+            metadataKeyStatus(stored: .success(nil), hasConfigFallback: false) == .missing
+        )
+        // A blank stored value is not a saved key.
+        #expect(
+            metadataKeyStatus(stored: .success("  "), hasConfigFallback: false) == .missing
+        )
+    }
+
+    @Test("Settings reports an unreadable Keychain instead of claiming no key is saved")
+    func settingsStatusWhenKeychainFails() {
+        let failure = Result<String?, any Error>.failure(
+            CredentialStoreError.unexpectedStatus(errSecInteractionNotAllowed)
+        )
+        // Crucially, this must not report .developerFallback or .missing: those
+        // would tell the user nothing is stored while search fails on the key
+        // that in fact is stored but cannot be read.
+        #expect(metadataKeyStatus(stored: failure, hasConfigFallback: true) == .unreadable)
+        #expect(metadataKeyStatus(stored: failure, hasConfigFallback: false) == .unreadable)
+        #expect(metadataKeyStatus(stored: failure, hasConfigFallback: true).isUsable == false)
+        #expect(metadataKeyStatus(stored: failure, hasConfigFallback: true).maskedKey == nil)
+
+        let decodeFailure = Result<String?, any Error>.failure(CredentialStoreError.invalidEncoding)
+        #expect(metadataKeyStatus(stored: decodeFailure, hasConfigFallback: true) == .unreadable)
+    }
+
     @Test("Credential-bearing requests use a session that cannot cache to disk")
     func metadataSessionHasNoDiskCache() {
         #expect(URLSessionHTTPClient.secretless().persistsResponsesToDisk == false)

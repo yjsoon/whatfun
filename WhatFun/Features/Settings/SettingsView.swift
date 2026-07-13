@@ -130,9 +130,9 @@ private struct MetadataKeyRow: View {
     let guidance: LocalizedStringKey
 
     @Environment(AppServices.self) private var services
-    /// Only ever the masked form. The plaintext key is read, masked, and dropped:
-    /// it never comes to rest in view state.
-    @State private var maskedKey: String?
+    /// Never holds the plaintext key: the value is read, masked, and dropped. A
+    /// failed Keychain read is its own state, not "no key saved".
+    @State private var status = MetadataKeyStatus.missing
     @State private var isEditing = false
 
     var body: some View {
@@ -141,39 +141,49 @@ private struct MetadataKeyRow: View {
         } label: {
             LabeledContent {
                 Label(statusText, systemImage: statusSymbol)
-                    .foregroundStyle(isConfigured ? WhatFunTheme.sage : WhatFunTheme.coral)
+                    .foregroundStyle(status.isUsable ? WhatFunTheme.sage : WhatFunTheme.coral)
             } label: {
                 Text(credentialKey.displayName)
                     .foregroundStyle(.primary)
             }
         }
         .task(id: isEditing) {
-            let stored = try? await services.credentials.value(for: credentialKey.account)
-            maskedKey = stored.flatMap { $0.isEmpty ? nil : maskedCredential($0) }
+            status = await loadStatus()
         }
         .sheet(isPresented: $isEditing) {
             MetadataKeyEditorView(
                 credentialKey: credentialKey,
                 hasConfigFallback: hasConfigFallback,
                 guidance: guidance,
-                maskedKey: maskedKey
+                status: status
             )
         }
     }
 
-    private var isConfigured: Bool {
-        maskedKey != nil || hasConfigFallback
+    private func loadStatus() async -> MetadataKeyStatus {
+        do {
+            let stored = try await services.credentials.value(for: credentialKey.account)
+            return metadataKeyStatus(stored: .success(stored), hasConfigFallback: hasConfigFallback)
+        } catch {
+            return metadataKeyStatus(stored: .failure(error), hasConfigFallback: hasConfigFallback)
+        }
     }
 
     private var statusText: String {
-        if let maskedKey {
-            return maskedKey
+        switch status {
+        case let .saved(masked): masked
+        case .developerFallback: String(localized: "Developer key")
+        case .missing: String(localized: "Add Key")
+        case .unreadable: String(localized: "Keychain unavailable")
         }
-        return hasConfigFallback ? String(localized: "Developer key") : String(localized: "Add Key")
     }
 
     private var statusSymbol: String {
-        isConfigured ? "checkmark.circle.fill" : "key"
+        switch status {
+        case .saved, .developerFallback: "checkmark.circle.fill"
+        case .missing: "key"
+        case .unreadable: "exclamationmark.triangle.fill"
+        }
     }
 }
 
@@ -181,9 +191,9 @@ private struct MetadataKeyEditorView: View {
     let credentialKey: MetadataCredentialKey
     let hasConfigFallback: Bool
     let guidance: LocalizedStringKey
-    /// The already-masked saved key, or nil when none is saved. The editor never
-    /// needs the plaintext: it only writes a new one or removes the existing one.
-    let maskedKey: String?
+    /// Carries at most the masked key. The editor never needs the plaintext: it
+    /// only writes a new key or removes the existing one.
+    let status: MetadataKeyStatus
 
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
@@ -194,8 +204,18 @@ private struct MetadataKeyEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if status == .unreadable {
+                    Section {
+                        Label(
+                            "WhatFun couldn’t read your saved key from the Keychain, so it can’t tell whether one is stored. Unlock your device and reopen Settings. Saving a key below will overwrite whatever is there.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .foregroundStyle(WhatFunTheme.coral)
+                    }
+                }
+
                 Section {
-                    SecureField(maskedKey == nil ? "Paste key" : "Paste replacement key", text: $draftKey)
+                    SecureField(status.maskedKey == nil ? "Paste key" : "Paste replacement key", text: $draftKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .disabled(isWorking)
@@ -212,7 +232,7 @@ private struct MetadataKeyEditorView: View {
                     }
                 }
 
-                if let maskedKey {
+                if let maskedKey = status.maskedKey {
                     Section {
                         LabeledContent("Saved key", value: maskedKey)
                         Button("Remove Key", role: .destructive) {
