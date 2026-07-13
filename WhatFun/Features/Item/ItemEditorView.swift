@@ -21,6 +21,13 @@ struct ItemEditorView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showPublicFeedWarning = false
+    // The feed field's state as loaded from storage, so unrelated edits neither
+    // re-trigger privacy prompts nor reverse an explicit "keep public" choice.
+    @State private var loadedFeedURL = ""
+    @State private var loadedIsPrivateFeed = false
+    // False while a private feed's secret could not be read (failed Keychain read
+    // or a cross-install restore); a blank field then must not remove the feed.
+    @State private var feedFieldIsAuthoritative = true
 
     init(
         itemID: UUID? = nil,
@@ -89,6 +96,8 @@ struct ItemEditorView: View {
                         of: tomorrow
                     ) ?? tomorrow
                 }
+                loadedFeedURL = draft.feedURL
+                loadedIsPrivateFeed = draft.isPrivateFeed
                 didLoadExistingItem = true
             }
             .onChange(of: selectedPhoto) { _, item in
@@ -114,9 +123,12 @@ struct ItemEditorView: View {
                 Text(errorMessage ?? "An unknown error occurred.")
             }
             .onChange(of: draft.feedURL) { _, newValue in
-                // A pasted feed that looks tokenised is auto-suggested as private so
-                // the credential never lands in a plain-text export by accident.
-                guard draft.mediaKind == .podcast, !draft.isPrivateFeed,
+                // A feed the user pastes that looks tokenised is auto-suggested as
+                // private so the credential never lands in a plain-text export by
+                // accident. The gate on the loaded value keeps the programmatic
+                // draft load from reversing an explicit "keep public" choice.
+                guard didLoadExistingItem, newValue != loadedFeedURL,
+                      draft.mediaKind == .podcast, !draft.isPrivateFeed,
                       let raw = newValue.nilIfBlank,
                       let url = PodcastFeedPrivacy.validatedFeedURL(from: raw),
                       PodcastFeedPrivacy.containsEmbeddedCredential(in: url) else { return }
@@ -323,9 +335,12 @@ struct ItemEditorView: View {
     }
 
     private func handleSaveTapped() async {
-        guard !draft.trimmedTitle.isEmpty else { return }
-        // Warn before persisting a credential-looking feed URL in plain text.
+        guard !draft.trimmedTitle.isEmpty, !isSaving, didLoadExistingItem else { return }
+        // Warn before persisting a credential-looking feed URL in plain text —
+        // but only when the feed settings actually changed, so an already-made
+        // "keep public" choice is not re-litigated on every unrelated edit.
         if draft.mediaKind == .podcast, !draft.isPrivateFeed,
+           draft.feedURL != loadedFeedURL || draft.isPrivateFeed != loadedIsPrivateFeed,
            let raw = draft.feedURL.nilIfBlank,
            let url = PodcastFeedPrivacy.validatedFeedURL(from: raw),
            PodcastFeedPrivacy.containsEmbeddedCredential(in: url) {
@@ -336,14 +351,21 @@ struct ItemEditorView: View {
     }
 
     private func save() async {
-        guard !draft.trimmedTitle.isEmpty else { return }
+        guard !draft.trimmedTitle.isEmpty, !isSaving, didLoadExistingItem else { return }
         isSaving = true
         defer { isSaving = false }
 
         var credentialMutations: [CredentialMutation] = []
+        // ActivityService commits internally, so once it is involved a partial
+        // commit may exist. From that point Keychain compensation must stop: an
+        // orphaned secret is harmless, but deleting one that a committed feed
+        // reference points at destroys the feed.
+        var mayHaveCommitted = false
+        let item: LibraryItem
+        let reminder: StartReminder?
         do {
             let isNew = existingItem == nil
-            let item = existingItem ?? LibraryItem(
+            item = existingItem ?? LibraryItem(
                 mediaKind: draft.mediaKind,
                 title: draft.trimmedTitle
             )
@@ -352,36 +374,61 @@ struct ItemEditorView: View {
             try reconcileFacets(for: item)
             try await reconcileArtwork(for: item)
             try await reconcilePodcastFeed(for: item, credentialMutations: &credentialMutations)
-            let reminder = reconcileReminder(for: item)
+            reminder = reconcileReminder(for: item)
 
             let activity = ActivityService(context: modelContext)
             if isNew {
+                // A single atomic save: if it throws, nothing was committed.
                 _ = try activity.register(item)
+                mayHaveCommitted = true
             }
 
             if draft.status != previousStatus || (isNew && draft.status != .planned) {
+                // applyStatus can save more than once, so a throw here may leave
+                // an earlier commit behind.
+                mayHaveCommitted = true
                 try applyStatus(draft.status, to: item, using: activity)
             } else {
                 ActivityProjection.rebuild(item)
                 try modelContext.save()
+                mayHaveCommitted = true
             }
-
-            try await schedule(reminder: reminder, for: item)
-            dismiss()
         } catch {
-            // The persistence step failed, so undo any Keychain writes it relied on.
-            await restoreCredentials(credentialMutations)
+            // Discard pending mutations before the autosaving main context can
+            // flush them (a failed save must not leak a plaintext feed URL into
+            // SwiftData), then undo any strictly pre-commit Keychain writes.
+            modelContext.rollback()
+            if !mayHaveCommitted {
+                await restoreCredentials(credentialMutations)
+            }
             errorMessage = error.localizedDescription
+            return
         }
+
+        // The item is saved; reminder scheduling is best-effort and must never
+        // undo the committed data or its Keychain secret.
+        do {
+            try await schedule(reminder: reminder, for: item)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        dismiss()
     }
 
     private func loadPrivateFeedURL(for item: LibraryItem) async {
         guard let reference = (item.externalReferences ?? []).first(where: {
             $0.providerRaw == "rss" && $0.isActiveFeed
-        }), reference.isPrivateFeed, let key = reference.credentialKeychainID else { return }
-        if let secret = try? await services.credentials.value(for: key) {
-            draft.feedURL = secret
+        }), reference.isPrivateFeed else { return }
+        guard let key = reference.credentialKeychainID,
+              let secret = try? await services.credentials.value(for: key) else {
+            // The secret is unavailable (failed read, or a cross-install restore
+            // whose Keychain entry never travelled). The blank field must not be
+            // mistaken for the user clearing the feed.
+            feedFieldIsAuthoritative = false
+            return
         }
+        draft.feedURL = secret
     }
 
     private func restoreCredentials(_ mutations: [CredentialMutation]) async {
@@ -513,21 +560,36 @@ struct ItemEditorView: View {
             $0.providerRaw == "rss" && $0.isActiveFeed
         }
 
-        // Clearing the field removes the feed reference (and its stored secret).
+        // Clearing the field removes the feed reference (and its stored secret) —
+        // but only when the field genuinely reflected the stored feed. If a
+        // private feed's secret could not be loaded, the blank field says nothing
+        // about the user's intent and the feed must survive unrelated edits.
         guard let rawValue = draft.feedURL.nilIfBlank else {
-            if let existing {
-                try await forgetCredential(for: existing, credentialMutations: &credentialMutations)
-                item.externalReferences?.removeAll { $0.id == existing.id }
-                modelContext.delete(existing)
-            }
+            guard feedFieldIsAuthoritative, let existing else { return }
+            try await forgetCredential(for: existing, credentialMutations: &credentialMutations)
+            item.externalReferences?.removeAll { $0.id == existing.id }
+            modelContext.delete(existing)
             return
         }
-        // A non-blank but malformed URL must never silently destroy an existing feed.
-        guard PodcastFeedPrivacy.validatedFeedURL(from: rawValue) != nil else { return }
+        // A malformed URL must never silently destroy or corrupt an existing feed;
+        // fail the save with feedback instead.
+        guard PodcastFeedPrivacy.validatedFeedURL(from: rawValue) != nil else {
+            throw InvalidFeedURLError()
+        }
 
         // Honour the toggle: a credential-looking URL is only ever public here after
         // the user has explicitly confirmed it through the save-time warning.
         let isPrivate = draft.isPrivateFeed
+
+        // Nothing changed: skip the Keychain round-trip and the updatedAt churn.
+        if let existing, existing.isPrivateFeed == isPrivate {
+            let isUnchanged = isPrivate
+                ? feedFieldIsAuthoritative
+                    && rawValue == loadedFeedURL
+                    && existing.credentialKeychainID != nil
+                : existing.canonicalURLString == rawValue
+            if isUnchanged { return }
+        }
         let reference = existing ?? ExternalReference(
             ownerItem: item,
             providerRaw: "rss",
@@ -631,6 +693,12 @@ struct ItemEditorView: View {
     }
 }
 
+private struct InvalidFeedURLError: LocalizedError {
+    var errorDescription: String? {
+        "The podcast feed URL must be a full web address beginning with http:// or https://."
+    }
+}
+
 private struct ItemDraft {
     var mediaKind: MediaKind
     var title = ""
@@ -677,7 +745,11 @@ private struct ItemDraft {
         genres = Self.facetNames(item, kind: .genre)
         platforms = Self.facetNames(item, kind: .platform)
         coverURL = item.preferredArtwork?.remoteURLString ?? ""
-        if let reference = (item.externalReferences ?? []).first(where: { $0.providerRaw == "rss" }) {
+        // Match reconcilePodcastFeed's lookup exactly, so the editor never shows
+        // one reference while writing another.
+        if let reference = (item.externalReferences ?? []).first(where: {
+            $0.providerRaw == "rss" && $0.isActiveFeed
+        }) {
             feedURL = reference.canonicalURLString ?? ""
             isPrivateFeed = reference.isPrivateFeed
         }

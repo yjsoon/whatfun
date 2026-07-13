@@ -367,8 +367,11 @@ final class StagedImportApplier {
             report.createdUnits += 1
         }
 
+        // The full feed heuristic would misread opaque episode GUIDs; explicit
+        // credentials (userinfo, tokenised query) are all that matter here, and
+        // everything is suppressed anyway when the feed itself is private.
         let identifierIsSensitive = URL(string: sourceIdentifier)
-            .map { PodcastFeedPrivacy.containsEmbeddedCredential(in: $0) } ?? false
+            .map { PodcastFeedPrivacy.containsExplicitCredential(in: $0) } ?? false
         episode.episodeGUIDHash = guidHash
         episode.episodeGUID = feedIsPrivate || identifierIsSensitive ? nil : sourceIdentifier
         episode.title = proposal.episodeTitle
@@ -1149,7 +1152,7 @@ final class StagedImportApplier {
 
     private func safePublicURL(_ rawValue: String) -> String? {
         guard let url = PodcastFeedPrivacy.validatedFeedURL(from: rawValue),
-              !PodcastFeedPrivacy.containsEmbeddedCredential(in: url) else { return nil }
+              !PodcastFeedPrivacy.containsExplicitCredential(in: url) else { return nil }
         return rawValue
     }
 

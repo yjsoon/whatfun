@@ -92,6 +92,66 @@ struct SwiftDataArchiveBridgeTests {
         #expect(reference.credentialKeychainID == beforeMergeKey)
     }
 
+    @Test("Restoring a legacy archive reclassifies a public-flagged tokenised feed")
+    func restoreReclassifiesTokenisedPublicFeed() async throws {
+        let container = try AppModelContainer.make(isStoredInMemoryOnly: true)
+        let credentials = InMemoryCredentialStore()
+        let bridge = SwiftDataArchiveBridge(
+            context: container.mainContext,
+            credentials: credentials
+        )
+
+        // A pre-fix or third-party archive: an active rss feed flagged public
+        // whose URL carries a path-embedded token in plain text.
+        let tokenURL = "https://example-premium.com/premium/tok_abc123def/feed.rss"
+        var payload = ArchiveFixture.payload
+        payload.externalReferences.append(ArchiveExternalReferenceRecord(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000042")!,
+            itemID: ArchiveFixture.itemID,
+            unitID: nil,
+            provider: "rss",
+            recordKind: "podcastFeed",
+            externalID: tokenURL,
+            canonicalURL: tokenURL,
+            lastFetchedAt: nil,
+            etag: nil,
+            lastModified: nil,
+            payloadHash: nil,
+            payloadVersion: nil,
+            attributionText: nil,
+            attributionURL: nil,
+            isActiveFeed: true,
+            isPrivateFeed: false,
+            credentialKeychainID: nil,
+            createdAt: ArchiveFixture.timestamp,
+            updatedAt: ArchiveFixture.timestamp,
+        ))
+
+        let report = try await bridge.restore(
+            payload: payload,
+            privatePayload: nil,
+            mode: .replaceAll
+        )
+
+        let reference = try #require(
+            try container.mainContext.fetch(FetchDescriptor<ExternalReference>())
+                .first { $0.providerRaw == "rss" && $0.isActiveFeed }
+        )
+        let credentialKey = try #require(reference.credentialKeychainID)
+
+        #expect(report.restoredPrivateFeeds == 1)
+        #expect(reference.isPrivateFeed)
+        #expect(reference.canonicalURLString == nil)
+        #expect(reference.externalID.hasPrefix("private."))
+        #expect(!reference.externalID.contains("tok_abc123def"))
+        #expect(await credentials.value(for: credentialKey) == tokenURL)
+
+        // A re-export of the repaired library must not leak the token.
+        let snapshot = try await bridge.snapshot()
+        let plainPayload = try JSONEncoder().encode(snapshot.payload)
+        #expect(!String(decoding: plainPayload, as: UTF8.self).contains("tok_abc123def"))
+    }
+
     @Test("Full JSON authenticates private data before replace-all mutates SwiftData")
     func fullBackupCoordinator() async throws {
         let sourceContainer = try AppModelContainer.make(isStoredInMemoryOnly: true)

@@ -376,9 +376,11 @@ final class SwiftDataArchiveBridge {
                     : reference.externalID,
                 canonicalURL: reference.isPrivateFeed ? nil : reference.canonicalURLString,
                 lastFetchedAt: reference.lastFetchedAt,
-                etag: reference.etag,
-                lastModified: reference.lastModified,
-                payloadHash: reference.payloadHash,
+                // Server-issued sync markers can echo per-subscriber details, so
+                // they stay out of archives for private feeds.
+                etag: reference.isPrivateFeed ? nil : reference.etag,
+                lastModified: reference.isPrivateFeed ? nil : reference.lastModified,
+                payloadHash: reference.isPrivateFeed ? nil : reference.payloadHash,
                 payloadVersion: reference.payloadVersion,
                 attributionText: reference.attributionText,
                 attributionURL: reference.attributionURLString,
@@ -1013,6 +1015,29 @@ final class SwiftDataArchiveBridge {
                     reference.credentialKeychainID = key
                     report.restoredPrivateFeeds += 1
                 }
+            }
+
+            // A pre-fix or third-party archive may mark a tokenised feed URL as
+            // public. Classify at the restore boundary so such a URL never
+            // re-enters SwiftData in plain text and re-exports forever.
+            for referenceID in insertedReferenceIDs {
+                guard let reference = referencesByID[referenceID],
+                      reference.providerRaw == "rss",
+                      reference.isActiveFeed,
+                      !reference.isPrivateFeed,
+                      let rawURL = reference.canonicalURLString
+                else { continue }
+                let looksCredentialed = PodcastFeedPrivacy.validatedFeedURL(from: rawURL)
+                    .map { PodcastFeedPrivacy.classify(untrustedFeed: $0).isPrivate } ?? true
+                guard looksCredentialed else { continue }
+                let key = "podcast-feed.restore.\(reference.rootItemID.uuidString.lowercased()).\(UUID().uuidString.lowercased())"
+                try await credentials.set(rawURL, for: key)
+                newlyWrittenCredentialKeys.append(key)
+                reference.isPrivateFeed = true
+                reference.credentialKeychainID = key
+                reference.canonicalURLString = nil
+                reference.externalID = "private.\(reference.id.uuidString.lowercased())"
+                report.restoredPrivateFeeds += 1
             }
 
             for record in payload.items {
