@@ -19,6 +19,7 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000004 /* WhatFun.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WhatFun.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000005 /* WhatFunTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WhatFunTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000006 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Configuration/Config.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -68,6 +69,7 @@
 		A10000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000006 /* Config.xcconfig */,
 				A10000000000000000000007 /* WhatFun */,
 				A10000000000000000000008 /* WhatFunTests */,
 				A10000000000000000000003 /* Products */,
@@ -333,6 +335,7 @@
 		};
 		A10000000000000000000041 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A10000000000000000000006 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -369,6 +372,7 @@
 		};
 		A10000000000000000000042 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A10000000000000000000006 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

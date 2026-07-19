@@ -32,7 +32,7 @@ struct LibraryView: View {
                         Text("Add something manually or find it with metadata search.")
                     } actions: {
                         Button("Add Item", systemImage: "plus") {
-                            navigation.presentedSheet = .addItem
+                            navigation.presentedSheet = .quickAdd()
                         }
                         .buttonStyle(.glassProminent)
 
@@ -81,7 +81,7 @@ struct LibraryView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Add Item", systemImage: "plus") {
-                    navigation.presentedSheet = .addItem
+                    navigation.presentedSheet = .quickAdd()
                 }
             }
 

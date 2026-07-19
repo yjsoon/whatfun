@@ -57,6 +57,32 @@ nonisolated struct RAWGMetadataProvider: MetadataProvider {
     }
 
     @concurrent
+    func featured(_ request: MetadataDiscoveryRequest) async throws -> MetadataSearchPage {
+        let resolution = credential.currentToken()
+        try validate(request, availability: availability(for: resolution))
+        let apiKey = try requireToken(resolution)
+        let response = try await httpClient.send(
+            makeRequest(
+                path: "/api/games",
+                queryItems: [
+                    URLQueryItem(name: "key", value: apiKey),
+                    URLQueryItem(name: "ordering", value: "-added"),
+                    URLQueryItem(name: "page", value: String(request.page)),
+                    URLQueryItem(name: "page_size", value: String(request.limit)),
+                ]
+            )
+        )
+        let payload = try decode(RAWGSearchResponse.self, from: response.data)
+        let totalPages = max(1, Int(ceil(Double(payload.count) / Double(request.limit))))
+        return MetadataSearchPage(
+            results: payload.results.map(makeResult),
+            page: request.page,
+            totalPages: totalPages,
+            totalResults: payload.count
+        )
+    }
+
+    @concurrent
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
         let resolution = credential.currentToken()
         try validate(request, availability: availability(for: resolution))

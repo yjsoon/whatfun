@@ -1,0 +1,17 @@
+{
+  "feed": {
+    "results": [
+      {
+        "artistName": "Example Studio",
+        "id": "123456789",
+        "name": "The Example Show",
+        "artworkUrl100": "https://example.com/artwork.png",
+        "genres": [
+          {"name": "Technology"},
+          {"name": "Education"}
+        ],
+        "url": "https://podcasts.apple.com/sg/podcast/the-example-show/id123456789"
+      }
+    ]
+  }
+}

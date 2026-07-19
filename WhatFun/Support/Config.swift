@@ -1,13 +1,11 @@
 import Foundation
 
-/// All metadata-provider credentials live here so a local checkout has one setup point.
-/// Do not commit real production keys to a public repository.
+/// Build credentials come from the ignored `Secrets.xcconfig.local` file via
+/// Info.plist substitution. A public checkout resolves missing values to empty
+/// strings and can still use the Keychain-backed fields in Settings.
 enum Config {
-    /// Create a TMDB API read-access token at https://www.themoviedb.org/settings/api
-    static let tmdbReadAccessToken = "YOUR_TMDB_READ_ACCESS_TOKEN"
-
-    /// Create a RAWG API key at https://rawg.io/apidocs
-    static let rawgAPIKey = "YOUR_RAWG_API_KEY"
+    static let tmdbReadAccessToken = bundledValue(for: "TMDBReadAccessToken")
+    static let rawgAPIKey = bundledValue(for: "RAWGAPIKey")
 
     /// Open Library does not require a key. Identify the app in requests per its API guidance.
     static let openLibraryContactEmail = "YOUR_CONTACT_EMAIL"
@@ -16,11 +14,15 @@ enum Config {
     static let applicationName = "WhatFun"
 
     static var hasTMDBCredentials: Bool {
-        !tmdbReadAccessToken.hasPrefix("YOUR_") && !tmdbReadAccessToken.isEmpty
+        !tmdbReadAccessToken.isEmpty
     }
 
     static var hasRAWGCredentials: Bool {
-        !rawgAPIKey.hasPrefix("YOUR_") && !rawgAPIKey.isEmpty
+        !rawgAPIKey.isEmpty
+    }
+
+    private static func bundledValue(for key: String) -> String {
+        (Bundle.main.object(forInfoDictionaryKey: key) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
-

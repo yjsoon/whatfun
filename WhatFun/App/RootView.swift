@@ -51,6 +51,12 @@ struct RootView: View {
         .environment(navigation)
         .sheet(item: $navigation.presentedSheet) { sheet in
             switch sheet {
+            case let .quickAdd(initialMediaKind, destinationListID):
+                QuickAddView(
+                    initialMediaKind: initialMediaKind,
+                    destinationListID: destinationListID
+                )
+                    .environment(navigation)
             case .addItem:
                 ItemEditorView()
             case let .addItemFor(kind, query):

@@ -30,6 +30,33 @@ nonisolated struct OpenLibraryMetadataProvider: MetadataProvider {
         }
     }
 
+    func featured(_ request: MetadataDiscoveryRequest) async throws -> MetadataSearchPage {
+        try validate(request, availability: availability)
+        var queryItems = [
+            URLQueryItem(name: "q", value: "trending_z_score:{0 TO *]"),
+            URLQueryItem(name: "sort", value: "trending"),
+            URLQueryItem(name: "page", value: String(request.page)),
+            URLQueryItem(name: "limit", value: String(request.limit)),
+            URLQueryItem(
+                name: "fields",
+                value: "key,title,author_name,first_publish_year,cover_i,number_of_pages_median,subject"
+            ),
+        ]
+        if request.mediaType == .comic {
+            queryItems.append(URLQueryItem(name: "subject", value: "comics"))
+        }
+        if let languageCode = request.languageCode?.metadataNilIfBlank {
+            queryItems.append(URLQueryItem(name: "lang", value: languageCode))
+        }
+
+        return try await loadPage(
+            queryItems: queryItems,
+            mediaType: request.mediaType,
+            page: request.page,
+            limit: request.limit
+        )
+    }
+
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
         try validate(request)
         var queryItems = [
@@ -46,17 +73,15 @@ nonisolated struct OpenLibraryMetadataProvider: MetadataProvider {
             // favors series and collected editions rather than issue-level data.
             queryItems.append(URLQueryItem(name: "subject", value: "comics"))
         }
+        if let languageCode = request.languageCode?.metadataNilIfBlank {
+            queryItems.append(URLQueryItem(name: "lang", value: languageCode))
+        }
 
-        let response = try await httpClient.send(
-            makeRequest(path: "/search.json", queryItems: queryItems)
-        )
-        let payload = try decode(OpenLibrarySearchResponse.self, from: response.data)
-        let totalPages = max(1, Int(ceil(Double(payload.numFound) / Double(request.limit))))
-        return MetadataSearchPage(
-            results: payload.docs.compactMap { makeResult(from: $0, mediaType: request.mediaType) },
+        return try await loadPage(
+            queryItems: queryItems,
+            mediaType: request.mediaType,
             page: request.page,
-            totalPages: totalPages,
-            totalResults: payload.numFound
+            limit: request.limit
         )
     }
 
@@ -122,6 +147,25 @@ nonisolated struct OpenLibraryMetadataProvider: MetadataProvider {
         request.setValue(identity, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
+    }
+
+    private func loadPage(
+        queryItems: [URLQueryItem],
+        mediaType: MetadataMediaType,
+        page: Int,
+        limit: Int
+    ) async throws -> MetadataSearchPage {
+        let response = try await httpClient.send(
+            makeRequest(path: "/search.json", queryItems: queryItems)
+        )
+        let payload = try decode(OpenLibrarySearchResponse.self, from: response.data)
+        let totalPages = max(1, Int(ceil(Double(payload.numFound) / Double(limit))))
+        return MetadataSearchPage(
+            results: payload.docs.compactMap { makeResult(from: $0, mediaType: mediaType) },
+            page: page,
+            totalPages: totalPages,
+            totalResults: payload.numFound
+        )
     }
 
     private func makeResult(

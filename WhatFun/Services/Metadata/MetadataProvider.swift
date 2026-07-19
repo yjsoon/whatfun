@@ -6,6 +6,7 @@ nonisolated protocol MetadataProvider: Sendable {
     var attribution: MetadataAttribution? { get }
     var availability: MetadataProviderAvailability { get }
 
+    func featured(_ request: MetadataDiscoveryRequest) async throws -> MetadataSearchPage
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage
     func details(for result: MetadataSearchResult) async throws -> MetadataItemDetails
 }
@@ -46,6 +47,19 @@ nonisolated extension MetadataProvider {
             throw MetadataProviderError.unsupportedMediaType(
                 provider: id,
                 mediaType: result.mediaType
+            )
+        }
+        try validateCredential(availability)
+    }
+
+    func validate(
+        _ request: MetadataDiscoveryRequest,
+        availability: MetadataProviderAvailability
+    ) throws {
+        guard supportedMediaTypes.contains(request.mediaType) else {
+            throw MetadataProviderError.unsupportedMediaType(
+                provider: id,
+                mediaType: request.mediaType
             )
         }
         try validateCredential(availability)

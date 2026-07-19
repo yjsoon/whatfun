@@ -89,6 +89,15 @@ struct ListDetailView: View {
         .scrollContentBackground(.hidden)
         .navigationTitle(title)
         .archiveBackground()
+        .toolbar {
+            if let userList, userList.kind == .manual {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Add Item", systemImage: "plus") {
+                        navigation.presentedSheet = .quickAdd(destinationListID: userList.id)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -138,7 +147,13 @@ struct ListDetailView: View {
                 Text(emptyMessage)
             } actions: {
                 if isManualList {
-                    Button("Choose Items", systemImage: "plus") {
+                    Button("Add Item", systemImage: "plus") {
+                        if let userList {
+                            navigation.presentedSheet = .quickAdd(destinationListID: userList.id)
+                        }
+                    }
+
+                    Button("Choose from Library", systemImage: "checklist") {
                         managesMemberships = true
                     }
                 }

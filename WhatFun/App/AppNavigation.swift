@@ -18,6 +18,7 @@ enum AppRoute: Hashable, Sendable {
 }
 
 enum AppSheet: Identifiable, Hashable, Sendable {
+    case quickAdd(initialMediaKind: MediaKind? = nil, destinationListID: UUID? = nil)
     case addItem
     case addItemFor(MediaKind, String)
     case logSession(UUID)
@@ -26,6 +27,8 @@ enum AppSheet: Identifiable, Hashable, Sendable {
 
     var id: String {
         switch self {
+        case let .quickAdd(initialMediaKind, destinationListID):
+            "quick-add-\(initialMediaKind?.rawValue ?? "remembered")-\(destinationListID?.uuidString ?? "library")"
         case .addItem:
             "add-item"
         case let .addItemFor(kind, query):

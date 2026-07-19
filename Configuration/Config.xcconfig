@@ -1,0 +1,6 @@
+// Public build defaults. Keep real credentials in Secrets.xcconfig.local,
+// which is intentionally ignored by Git and included only when present.
+TMDB_READ_ACCESS_TOKEN =
+RAWG_API_KEY =
+
+#include? "Secrets.xcconfig.local"

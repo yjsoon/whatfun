@@ -35,12 +35,24 @@ struct HomeView: View {
 
     private var overdueItems: [LibraryItem] { rails.overdue }
 
+    private var selectedMediaKind: MediaKind? {
+        if case let .kind(kind) = mediaFilter { kind } else { nil }
+    }
+
+    private var toolbarAddTitle: String {
+        selectedMediaKind.map { "Add \(String(localized: $0.singularName))" } ?? "Add Item"
+    }
+
+    private var emptyAddTitle: String {
+        selectedMediaKind.map { "Add \(String(localized: $0.singularName))" } ?? "Add Your First Item"
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 28) {
                 MediaFilterBar(selection: $mediaFilter)
 
-                if items.isEmpty {
+                if visibleItems.isEmpty {
                     welcome
                 } else {
                     if !overdueItems.isEmpty {
@@ -77,22 +89,8 @@ struct HomeView: View {
             }
 
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if !activeItems.isEmpty {
-                        Section("Log a Session") {
-                            ForEach(activeItems.prefix(8)) { item in
-                                Button(item.title, systemImage: item.mediaKind.symbolName) {
-                                    navigation.presentedSheet = .logSession(item.id)
-                                }
-                            }
-                        }
-                    }
-
-                    Button("Add Item", systemImage: "plus") {
-                        navigation.presentedSheet = .addItem
-                    }
-                } label: {
-                    Label("Quick Actions", systemImage: "plus")
+                Button(toolbarAddTitle, systemImage: "plus") {
+                    navigation.presentedSheet = .quickAdd(initialMediaKind: selectedMediaKind)
                 }
             }
         }
@@ -104,8 +102,8 @@ struct HomeView: View {
         } description: {
             Text("Add something you want to read, watch, play, or hear. Each time you return to it, log a new session.")
         } actions: {
-            Button("Add Your First Item", systemImage: "plus") {
-                navigation.presentedSheet = .addItem
+            Button(emptyAddTitle, systemImage: "plus") {
+                navigation.presentedSheet = .quickAdd(initialMediaKind: selectedMediaKind)
             }
             .buttonStyle(.glassProminent)
 

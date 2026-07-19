@@ -26,6 +26,26 @@ struct MetadataProviderTests {
             .queryItems?.contains(URLQueryItem(name: "query", value: "Fight Club")) == true)
     }
 
+    @Test("TMDB discovery uses the media-specific trending feed")
+    func tmdbDiscovery() async throws {
+        let client = try FixtureHTTPClient(data: Fixture.data(named: "tmdb-search", extension: "json"))
+        let provider = TMDBMetadataProvider(httpClient: client, readAccessToken: "test-token")
+
+        let page = try await provider.featured(
+            MetadataDiscoveryRequest(
+                mediaType: .tvShow,
+                languageCode: "en",
+                countryCode: "SG"
+            )
+        )
+
+        #expect(page.results.first?.mediaType == .tvShow)
+        let request = try #require(await client.request(at: 0))
+        #expect(request.url?.path == "/3/trending/tv/day")
+        #expect(URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+            .queryItems?.contains(URLQueryItem(name: "language", value: "en-SG")) == true)
+    }
+
     @Test("TMDB missing credentials fails before networking and supports manual fallback")
     func tmdbMissingCredentials() async throws {
         let client = FixtureHTTPClient(data: Data())
@@ -78,6 +98,28 @@ struct MetadataProviderTests {
         #expect(request.value(forHTTPHeaderField: "User-Agent")?.contains("mailto:developer@example.com") == true)
     }
 
+    @Test("Open Library discovery requests trending works")
+    func openLibraryDiscovery() async throws {
+        let client = try FixtureHTTPClient(
+            data: Fixture.data(named: "open-library-search", extension: "json")
+        )
+        let provider = OpenLibraryMetadataProvider(
+            httpClient: client,
+            applicationName: "WhatFun",
+            contactEmail: "developer@example.com"
+        )
+
+        _ = try await provider.featured(MetadataDiscoveryRequest(mediaType: .book))
+
+        let request = try #require(await client.request(at: 0))
+        let queryItems = URLComponents(
+            url: try #require(request.url),
+            resolvingAgainstBaseURL: false
+        )?.queryItems
+        #expect(queryItems?.contains(URLQueryItem(name: "sort", value: "trending")) == true)
+        #expect(queryItems?.contains(URLQueryItem(name: "q", value: "trending_z_score:{0 TO *]")) == true)
+    }
+
     @Test("RAWG maps games, platforms, and exposes required attribution")
     func rawgGameSearch() async throws {
         let client = try FixtureHTTPClient(data: Fixture.data(named: "rawg-search", extension: "json"))
@@ -96,6 +138,22 @@ struct MetadataProviderTests {
         let requestURL = try #require(request.url)
         #expect(URLComponents(url: requestURL, resolvingAgainstBaseURL: false)?
             .queryItems?.contains(URLQueryItem(name: "key", value: "test-key")) == true)
+    }
+
+    @Test("RAWG discovery requests the most-added games")
+    func rawgDiscovery() async throws {
+        let client = try FixtureHTTPClient(data: Fixture.data(named: "rawg-search", extension: "json"))
+        let provider = RAWGMetadataProvider(httpClient: client, apiKey: "test-key")
+
+        _ = try await provider.featured(MetadataDiscoveryRequest(mediaType: .game))
+
+        let request = try #require(await client.request(at: 0))
+        let queryItems = URLComponents(
+            url: try #require(request.url),
+            resolvingAgainstBaseURL: false
+        )?.queryItems
+        #expect(queryItems?.contains(URLQueryItem(name: "ordering", value: "-added")) == true)
+        #expect(queryItems?.contains(where: { $0.name == "search" }) == false)
     }
 
     @Test("Apple podcast discovery preserves the RSS feed URL")
@@ -122,6 +180,24 @@ struct MetadataProviderTests {
         let requestURL = try #require(request.url)
         #expect(URLComponents(url: requestURL, resolvingAgainstBaseURL: false)?
             .queryItems?.contains(URLQueryItem(name: "country", value: "SG")) == true)
+    }
+
+    @Test("Apple podcast discovery uses the regional top-shows chart")
+    func applePodcastDiscovery() async throws {
+        let client = try FixtureHTTPClient(
+            data: Fixture.data(named: "apple-podcast-chart", extension: "json")
+        )
+        let provider = ApplePodcastMetadataProvider(httpClient: client)
+
+        let page = try await provider.featured(
+            MetadataDiscoveryRequest(mediaType: .podcast, limit: 10, countryCode: "SG")
+        )
+
+        let result = try #require(page.results.first)
+        #expect(result.title == "The Example Show")
+        #expect(result.genres == ["Technology", "Education"])
+        let request = try #require(await client.request(at: 0))
+        #expect(request.url?.path == "/api/v2/sg/podcasts/top/10/podcasts.json")
     }
 }
 

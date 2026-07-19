@@ -2,9 +2,15 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+enum SearchPresentation {
+    case library
+    case quickAdd
+}
+
 struct SearchView: View {
     @Environment(AppServices.self) private var services
     @Environment(AppNavigation.self) private var navigation
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \LibraryItem.updatedAt, order: .reverse) private var libraryItems: [LibraryItem]
 
@@ -16,22 +22,43 @@ struct SearchView: View {
     @State private var addedKeys = Set<MetadataDuplicateKey>()
     @State private var addFailure: SearchAddFailure?
     @State private var successfulAdds = 0
+    @State private var isSearchPresented = false
+    @AppStorage("quick-add.last-media-kind") private var storedMediaKindRaw = MediaKind.movie.rawValue
 
+    private let presentation: SearchPresentation
+    private let usesRememberedMediaKind: Bool
     private let onOpenItem: (UUID) -> Void
+    private let onSelectLocalItem: ((LibraryItem) throws -> Bool)?
     private let onRequestManualAdd: ((MediaKind, String) -> Void)?
+    private let onAddItem: ((LibraryItem) throws -> (() -> Void)?)?
+    private let addDestinationName: String?
 
     init(
         initialMediaKind: MediaKind = .movie,
+        presentation: SearchPresentation = .library,
+        usesRememberedMediaKind: Bool = true,
         onOpenItem: @escaping (UUID) -> Void = { _ in },
-        onRequestManualAdd: ((MediaKind, String) -> Void)? = nil
+        onSelectLocalItem: ((LibraryItem) throws -> Bool)? = nil,
+        onRequestManualAdd: ((MediaKind, String) -> Void)? = nil,
+        onAddItem: ((LibraryItem) throws -> (() -> Void)?)? = nil,
+        addDestinationName: String? = nil
     ) {
         _selectedMediaKind = State(initialValue: initialMediaKind)
+        self.presentation = presentation
+        self.usesRememberedMediaKind = usesRememberedMediaKind
         self.onOpenItem = onOpenItem
+        self.onSelectLocalItem = onSelectLocalItem
         self.onRequestManualAdd = onRequestManualAdd
+        self.onAddItem = onAddItem
+        self.addDestinationName = addDestinationName
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            if presentation == .quickAdd {
+                quickAddHeader
+            }
+
             SearchMediaKindPicker(selection: $selectedMediaKind)
                 .padding(.vertical, 6)
 
@@ -40,7 +67,7 @@ struct SearchView: View {
 
             List {
                 if trimmedQuery.isEmpty {
-                    initialPrompt
+                    featuredResultsSection
                 } else {
                     localResultsSection
                     remoteResultsSection
@@ -49,16 +76,47 @@ struct SearchView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle("Search")
-        .searchable(text: $query, prompt: "Titles, creators, and series")
+        .navigationTitle(presentation == .quickAdd ? "Add to WhatFun" : "Search")
+        .navigationBarTitleDisplayMode(presentation == .quickAdd ? .inline : .automatic)
+        .searchable(
+            text: $query,
+            isPresented: $isSearchPresented,
+            prompt: "Titles, creators, and series"
+        )
         .searchToolbarBehavior(.minimize)
         .archiveBackground()
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Settings", systemImage: "gearshape") {
-                    navigation.showSettings()
+            if presentation == .library {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Settings", systemImage: "gearshape") {
+                        navigation.showSettings()
+                    }
                 }
             }
+        }
+        .task {
+            guard presentation == .quickAdd else { return }
+            if usesRememberedMediaKind {
+                if let storedKind = MediaKind(rawValue: storedMediaKindRaw) {
+                    selectedMediaKind = storedKind
+                }
+                if case .credentialRequired = selectedProvider?.availability,
+                   let availableKind = MediaKind.filterCases.first(where: { kind in
+                       guard let type = MetadataDomainMapper.metadataType(for: kind),
+                             let provider = services.metadata.catalog.primaryProvider(for: type)
+                       else { return false }
+                       return provider.availability == .available
+                   })
+                {
+                    selectedMediaKind = availableKind
+                }
+            }
+            await Task.yield()
+            isSearchPresented = true
+        }
+        .onChange(of: selectedMediaKind) { _, kind in
+            guard presentation == .quickAdd else { return }
+            storedMediaKindRaw = kind.rawValue
         }
         .task(id: searchTaskID) {
             await searchRemoteMetadata()
@@ -71,6 +129,31 @@ struct SearchView: View {
             )
         }
         .sensoryFeedback(.success, trigger: successfulAdds)
+    }
+
+    private var quickAddHeader: some View {
+        HStack {
+            Button("Enter Manually", systemImage: "square.and.pencil") {
+                onRequestManualAdd?(selectedMediaKind, trimmedQuery)
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.glass)
+
+            Spacer()
+
+            Text("Add to WhatFun")
+                .font(.headline)
+
+            Spacer()
+
+            Button("Done") {
+                dismiss()
+            }
+            .buttonStyle(.glass)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     private var trimmedQuery: String {
@@ -103,22 +186,62 @@ struct SearchView: View {
         return Array(matches[0 ..< min(20, matches.count)])
     }
 
-    @ViewBuilder
-    private var initialPrompt: some View {
-        ContentUnavailableView {
-            Label("Find Your Next Thing", systemImage: selectedMediaKind.symbolName)
-        } description: {
-            Text("Search your library and discover metadata for \(String(localized: selectedMediaKind.displayName)).")
-        } actions: {
-            if let onRequestManualAdd {
-                Button("Add Manually") {
-                    onRequestManualAdd(selectedMediaKind, "")
+    private var featuredResultsSection: some View {
+        Section {
+            switch remoteState {
+            case .idle, .loading:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Finding what’s popular…")
+                        .foregroundStyle(WhatFunTheme.secondaryInk)
                 }
-                .buttonStyle(.glassProminent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 26)
+                .listRowBackground(Color.clear)
+            case let .loaded(results):
+                if results.isEmpty {
+                    SearchMessageRow(
+                        symbol: "sparkles",
+                        title: "No popular titles right now",
+                        message: "Start typing to search, or enter an item manually."
+                    )
+                } else {
+                    ScrollView(.horizontal) {
+                        LazyHStack(alignment: .top, spacing: 14) {
+                            ForEach(results) { result in
+                                FeaturedMetadataCard(
+                                    result: result,
+                                    isAdding: addingKey == duplicateKey(for: result),
+                                    isAdded: addedKeys.contains(duplicateKey(for: result)),
+                                    isDisabled: addingKey != nil,
+                                    addDestinationName: addDestinationName,
+                                    add: { add(result) }
+                                )
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .contentMargins(.horizontal, 16, for: .scrollContent)
+                    .scrollIndicators(.hidden)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+            case let .failed(failure):
+                SearchFailureContent(
+                    failure: failure,
+                    retry: { retryNonce += 1 },
+                    manualAdd: onRequestManualAdd.map { action in
+                        { action(selectedMediaKind, trimmedQuery) }
+                    }
+                )
+                .listRowBackground(Color.clear)
             }
+        } header: {
+            Text("Popular \(String(localized: selectedMediaKind.displayName))")
+        } footer: {
+            MetadataAttributionFooter(attribution: selectedProvider?.attribution)
         }
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder
@@ -127,7 +250,7 @@ struct SearchView: View {
             Section("In Your Library") {
                 ForEach(matchingLibraryItems) { item in
                     Button {
-                        onOpenItem(item.id)
+                        selectLocalItem(item)
                     } label: {
                         LocalSearchResultRow(item: item)
                     }
@@ -171,6 +294,7 @@ struct SearchView: View {
                             isAdding: addingKey == duplicateKey(for: result),
                             isAdded: addedKeys.contains(duplicateKey(for: result)),
                             isDisabled: addingKey != nil,
+                            addDestinationName: addDestinationName,
                             add: { add(result) }
                         )
                         .listRowBackground(Color.clear)
@@ -178,33 +302,13 @@ struct SearchView: View {
                     manualAddRow
                 }
             case let .failed(failure):
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(failure.title, systemImage: "wifi.exclamationmark")
-                        .font(.headline)
-                    Text(failure.message)
-                        .font(.subheadline)
-                        .foregroundStyle(WhatFunTheme.secondaryInk)
-                    if let suggestion = failure.recoverySuggestion {
-                        Text(suggestion)
-                            .font(.caption)
-                            .foregroundStyle(WhatFunTheme.secondaryInk)
+                SearchFailureContent(
+                    failure: failure,
+                    retry: { retryNonce += 1 },
+                    manualAdd: onRequestManualAdd.map { action in
+                        { action(selectedMediaKind, trimmedQuery) }
                     }
-                    HStack(spacing: 10) {
-                        Button("Try Again") {
-                            retryNonce += 1
-                        }
-                        .buttonStyle(.glass)
-
-                        if let onRequestManualAdd {
-                            Button("Add Manually") {
-                                onRequestManualAdd(selectedMediaKind, trimmedQuery)
-                            }
-                            .buttonStyle(.glassProminent)
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-                .padding(.vertical, 14)
+                )
                 .listRowBackground(Color.clear)
             }
         } header: {
@@ -237,7 +341,7 @@ struct SearchView: View {
     }
 
     private func searchRemoteMetadata() async {
-        guard trimmedQuery.count >= 2,
+        guard trimmedQuery.isEmpty || trimmedQuery.count >= 2,
               let metadataType = MetadataDomainMapper.metadataType(for: selectedMediaKind),
               let provider = selectedProvider
         else {
@@ -247,16 +351,32 @@ struct SearchView: View {
 
         do {
             remoteState = .loading
-            try await Task.sleep(for: .milliseconds(350))
+            if !trimmedQuery.isEmpty {
+                try await Task.sleep(for: .milliseconds(350))
+            }
             try Task.checkCancellation()
-            let page = try await provider.search(
-                MetadataSearchRequest(
-                    query: trimmedQuery,
-                    mediaType: metadataType,
-                    languageCode: Locale.current.language.languageCode?.identifier,
-                    countryCode: Locale.current.region?.identifier
+            let languageCode = Locale.current.language.languageCode?.identifier
+            let countryCode = Locale.current.region?.identifier
+            let page: MetadataSearchPage
+            if trimmedQuery.isEmpty {
+                page = try await provider.featured(
+                    MetadataDiscoveryRequest(
+                        mediaType: metadataType,
+                        limit: 20,
+                        languageCode: languageCode,
+                        countryCode: countryCode
+                    )
                 )
-            )
+            } else {
+                page = try await provider.search(
+                    MetadataSearchRequest(
+                        query: trimmedQuery,
+                        mediaType: metadataType,
+                        languageCode: languageCode,
+                        countryCode: countryCode
+                    )
+                )
+            }
             try Task.checkCancellation()
             remoteState = .loaded(page.results)
         } catch is CancellationError {
@@ -296,16 +416,34 @@ struct SearchView: View {
                 ).insert(
                     result: result,
                     details: details,
-                    attribution: provider?.attribution
+                    attribution: provider?.attribution,
+                    beforeSave: onAddItem
                 )
                 addedKeys.insert(duplicateKey)
                 successfulAdds += 1
-                onOpenItem(insertion.item.id)
+                if presentation == .library {
+                    onOpenItem(insertion.item.id)
+                }
             } catch is CancellationError {
                 // Leaving Search should stop quietly.
             } catch {
                 addFailure = SearchAddFailure(message: error.localizedDescription)
             }
+        }
+    }
+
+    private func selectLocalItem(_ item: LibraryItem) {
+        guard let onSelectLocalItem else {
+            onOpenItem(item.id)
+            return
+        }
+
+        do {
+            if try onSelectLocalItem(item) {
+                successfulAdds += 1
+            }
+        } catch {
+            addFailure = SearchAddFailure(message: error.localizedDescription)
         }
     }
 
@@ -444,6 +582,7 @@ private struct RemoteSearchResultRow: View {
     let isAdding: Bool
     let isAdded: Bool
     let isDisabled: Bool
+    let addDestinationName: String?
     let add: () -> Void
 
     private var mediaKind: MediaKind {
@@ -497,7 +636,7 @@ private struct RemoteSearchResultRow: View {
             }
             .buttonStyle(.glassProminent)
             .disabled(isDisabled || isAdded)
-            .accessibilityLabel(isAdded ? "Added to library" : "Add \(result.title) to library")
+            .accessibilityLabel(accessibilityLabel)
         }
         .padding(.vertical, 4)
     }
@@ -507,11 +646,83 @@ private struct RemoteSearchResultRow: View {
         let year = result.releaseYear.map(String.init)
         return [creator, year].compactMap(\.self).joined(separator: " · ").metadataNilIfBlank
     }
+
+    private var accessibilityLabel: String {
+        let destination = addDestinationName.map { "list \($0)" } ?? "library"
+        return isAdded ? "Added to \(destination)" : "Add \(result.title) to \(destination)"
+    }
+}
+
+private struct FeaturedMetadataCard: View {
+    let result: MetadataSearchResult
+    let isAdding: Bool
+    let isAdded: Bool
+    let isDisabled: Bool
+    let addDestinationName: String?
+    let add: () -> Void
+
+    private var mediaKind: MediaKind {
+        MetadataDomainMapper.mediaKind(for: result.mediaType)
+    }
+
+    private var artworkHeight: CGFloat {
+        mediaKind == .podcast ? 132 : 184
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .bottomTrailing) {
+                SearchMetadataArtwork(
+                    url: result.coverImageURL ?? result.thumbnailImageURL,
+                    mediaKind: mediaKind,
+                    targetSize: CGSize(width: 132, height: artworkHeight)
+                )
+                .frame(width: 132, height: artworkHeight)
+                .clipShape(CoverShape(cornerRadius: 18))
+
+                Button(action: add) {
+                    Group {
+                        if isAdding {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else if isAdded {
+                            Image(systemName: "checkmark")
+                        } else {
+                            Image(systemName: "plus")
+                        }
+                    }
+                    .font(.headline.weight(.bold))
+                    .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(isDisabled || isAdded)
+                .padding(8)
+                .accessibilityLabel(accessibilityLabel)
+            }
+
+            Text(result.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(WhatFunTheme.ink)
+                .lineLimit(2)
+
+            Text(result.releaseYear.map(String.init) ?? result.creators.first ?? " ")
+                .font(.caption)
+                .foregroundStyle(WhatFunTheme.secondaryInk)
+                .lineLimit(1)
+        }
+        .frame(width: 132, alignment: .leading)
+    }
+
+    private var accessibilityLabel: String {
+        let destination = addDestinationName.map { "list \($0)" } ?? "library"
+        return isAdded ? "Added to \(destination)" : "Add \(result.title) to \(destination)"
+    }
 }
 
 private struct SearchMetadataArtwork: View {
     let url: URL?
     let mediaKind: MediaKind
+    var targetSize = CGSize(width: 64, height: 90)
 
     @Environment(AppServices.self) private var services
     @Environment(\.displayScale) private var displayScale
@@ -555,7 +766,7 @@ private struct SearchMetadataArtwork: View {
             try Task.checkCancellation()
             image = await ArtworkDownsampler.image(
                 from: data,
-                targetSize: CGSize(width: 64, height: 90),
+                targetSize: targetSize,
                 displayScale: displayScale
             )
             didFail = image == nil
@@ -591,6 +802,38 @@ private struct SearchMessageRow: View {
     }
 }
 
+private struct SearchFailureContent: View {
+    let failure: RemoteSearchFailure
+    let retry: () -> Void
+    let manualAdd: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(failure.title, systemImage: "wifi.exclamationmark")
+                .font(.headline)
+            Text(failure.message)
+                .font(.subheadline)
+                .foregroundStyle(WhatFunTheme.secondaryInk)
+            if let suggestion = failure.recoverySuggestion {
+                Text(suggestion)
+                    .font(.caption)
+                    .foregroundStyle(WhatFunTheme.secondaryInk)
+            }
+            HStack(spacing: 10) {
+                Button("Try Again", action: retry)
+                    .buttonStyle(.glass)
+
+                if let manualAdd {
+                    Button("Enter Manually", action: manualAdd)
+                        .buttonStyle(.glassProminent)
+                }
+            }
+            .padding(.top, 2)
+        }
+        .padding(.vertical, 14)
+    }
+}
+
 private struct MetadataAttributionFooter: View {
     let attribution: MetadataAttribution?
 
@@ -606,4 +849,110 @@ private struct MetadataAttributionFooter: View {
             .foregroundStyle(WhatFunTheme.secondaryInk)
         }
     }
+}
+
+struct QuickAddView: View {
+    private let initialMediaKind: MediaKind?
+    private let destinationListID: UUID?
+
+    @Query private var destinationLists: [UserList]
+    @Environment(AppNavigation.self) private var navigation
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @State private var manualAddRequest: ManualAddRequest?
+
+    init(initialMediaKind: MediaKind? = nil, destinationListID: UUID? = nil) {
+        self.initialMediaKind = initialMediaKind
+        self.destinationListID = destinationListID
+        let queryID = destinationListID ?? UUID()
+        _destinationLists = Query(
+            filter: #Predicate<UserList> { list in
+                list.id == queryID
+            }
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            SearchView(
+                initialMediaKind: initialMediaKind ?? .movie,
+                presentation: .quickAdd,
+                usesRememberedMediaKind: initialMediaKind == nil,
+                onSelectLocalItem: selectLocalItem,
+                onRequestManualAdd: { kind, query in
+                    manualAddRequest = ManualAddRequest(kind: kind, title: query)
+                },
+                onAddItem: { item in
+                    prepareDestinationListMembership(item)
+                },
+                addDestinationName: destinationLists.first?.name
+            )
+        }
+        .sheet(item: $manualAddRequest) { request in
+            ItemEditorView(
+                initialKind: request.kind,
+                initialTitle: request.title,
+                onPrepareSave: { item in
+                    _ = prepareDestinationListMembership(item)
+                }
+            )
+        }
+    }
+
+    private func selectLocalItem(_ item: LibraryItem) throws -> Bool {
+        if destinationListID != nil {
+            return try addToDestinationList(item)
+        }
+
+        dismiss()
+        Task { @MainActor in
+            await Task.yield()
+            navigation.showItem(item.id)
+        }
+        return false
+    }
+
+    @discardableResult
+    private func addToDestinationList(_ item: LibraryItem) throws -> Bool {
+        guard let undoPreparation = prepareDestinationListMembership(item) else { return false }
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            undoPreparation()
+            throw error
+        }
+    }
+
+    private func prepareDestinationListMembership(_ item: LibraryItem) -> (() -> Void)? {
+        guard destinationListID != nil,
+              let list = destinationLists.first,
+              !(list.memberships ?? []).contains(where: { $0.itemID == item.id })
+        else { return nil }
+
+        let previousUpdatedAt = list.updatedAt
+        let membership = ListMembership(
+            list: list,
+            item: item,
+            positionRank: String(format: "%08d", (list.memberships ?? []).count)
+        )
+        modelContext.insert(membership)
+        list.memberships = (list.memberships ?? []) + [membership]
+        if !(item.listMemberships ?? []).contains(where: { $0.id == membership.id }) {
+            item.listMemberships = (item.listMemberships ?? []) + [membership]
+        }
+        list.updatedAt = .now
+        return {
+            list.memberships?.removeAll { $0.id == membership.id }
+            item.listMemberships?.removeAll { $0.id == membership.id }
+            list.updatedAt = previousUpdatedAt
+            modelContext.delete(membership)
+        }
+    }
+}
+
+private struct ManualAddRequest: Identifiable {
+    let id = UUID()
+    let kind: MediaKind
+    let title: String
 }

@@ -21,6 +21,7 @@ struct MetadataLibraryInserter {
         result: MetadataSearchResult,
         details: MetadataItemDetails?,
         attribution: MetadataAttribution?,
+        beforeSave: ((LibraryItem) throws -> (() -> Void)?)? = nil,
         at date: Date = .now
     ) async throws -> MetadataInsertionResult {
         let draft = MetadataDomainMapper.makeDraft(
@@ -30,6 +31,15 @@ struct MetadataLibraryInserter {
         )
 
         if let existing = try existingItem(for: draft.duplicateKey) {
+            let undoPreparation = try beforeSave?(existing)
+            do {
+                if beforeSave != nil {
+                    try context.save()
+                }
+            } catch {
+                undoPreparation?()
+                throw error
+            }
             return MetadataInsertionResult(item: existing, wasInserted: false)
         }
 
@@ -57,6 +67,7 @@ struct MetadataLibraryInserter {
 
         var newlyCreatedFacets = [Facet]()
         var newlyCreatedMemberships = [ItemFacetMembership]()
+        var undoPreparation: (() -> Void)?
         do {
             attachProviderReference(to: item, draft: draft, at: date)
             attachPodcastFeedReference(
@@ -75,9 +86,11 @@ struct MetadataLibraryInserter {
                 newlyCreatedMemberships: &newlyCreatedMemberships
             )
             attachCreatedEvent(to: item, at: date)
+            undoPreparation = try beforeSave?(item)
             try context.save()
             return MetadataInsertionResult(item: item, wasInserted: true)
         } catch {
+            undoPreparation?()
             for membership in newlyCreatedMemberships {
                 context.delete(membership)
             }

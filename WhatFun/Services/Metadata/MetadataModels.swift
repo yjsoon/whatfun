@@ -71,6 +71,28 @@ nonisolated struct MetadataSearchRequest: Hashable, Sendable {
     }
 }
 
+nonisolated struct MetadataDiscoveryRequest: Hashable, Sendable {
+    let mediaType: MetadataMediaType
+    let page: Int
+    let limit: Int
+    let languageCode: String?
+    let countryCode: String?
+
+    init(
+        mediaType: MetadataMediaType,
+        page: Int = 1,
+        limit: Int = 20,
+        languageCode: String? = nil,
+        countryCode: String? = nil
+    ) {
+        self.mediaType = mediaType
+        self.page = max(1, page)
+        self.limit = min(max(1, limit), 50)
+        self.languageCode = languageCode
+        self.countryCode = countryCode
+    }
+}
+
 nonisolated struct MetadataSearchResult: Identifiable, Hashable, Codable, Sendable {
     let id: MetadataResultID
     let mediaType: MetadataMediaType

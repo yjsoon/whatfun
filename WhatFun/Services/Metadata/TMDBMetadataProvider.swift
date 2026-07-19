@@ -45,6 +45,38 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
     }
 
     @concurrent
+    func featured(_ request: MetadataDiscoveryRequest) async throws -> MetadataSearchPage {
+        let resolution = credential.currentToken()
+        try validate(request, availability: availability(for: resolution))
+        let readAccessToken = try requireToken(resolution)
+        let segment = request.mediaType == .movie ? "movie" : "tv"
+        var queryItems = [URLQueryItem(name: "page", value: String(request.page))]
+        if let language = tmdbLanguage(
+            languageCode: request.languageCode,
+            countryCode: request.countryCode
+        ) {
+            queryItems.append(URLQueryItem(name: "language", value: language))
+        }
+
+        let response = try await httpClient.send(
+            makeRequest(
+                path: "/3/trending/\(segment)/day",
+                queryItems: queryItems,
+                readAccessToken: readAccessToken
+            )
+        )
+        let payload = try decode(TMDBSearchResponse.self, from: response.data)
+        return MetadataSearchPage(
+            results: payload.results.prefix(request.limit).map {
+                makeResult(from: $0, mediaType: request.mediaType)
+            },
+            page: payload.page,
+            totalPages: payload.totalPages,
+            totalResults: payload.totalResults
+        )
+    }
+
+    @concurrent
     func search(_ request: MetadataSearchRequest) async throws -> MetadataSearchPage {
         let resolution = credential.currentToken()
         try validate(request, availability: availability(for: resolution))
@@ -55,8 +87,11 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
             URLQueryItem(name: "page", value: String(request.page)),
             URLQueryItem(name: "include_adult", value: "false"),
         ]
-        if let languageCode = request.languageCode?.metadataNilIfBlank {
-            queryItems.append(URLQueryItem(name: "language", value: languageCode))
+        if let language = tmdbLanguage(
+            languageCode: request.languageCode,
+            countryCode: request.countryCode
+        ) {
+            queryItems.append(URLQueryItem(name: "language", value: language))
         }
 
         let response = try await httpClient.send(
@@ -159,6 +194,16 @@ nonisolated struct TMDBMetadataProvider: MetadataProvider {
             )
         }
         return token
+    }
+
+    private func tmdbLanguage(languageCode: String?, countryCode: String?) -> String? {
+        guard let languageCode = languageCode?.metadataNilIfBlank else { return nil }
+        guard !languageCode.contains("-"), !languageCode.contains("_"),
+              let countryCode = countryCode?.metadataNilIfBlank
+        else {
+            return languageCode.replacingOccurrences(of: "_", with: "-")
+        }
+        return "\(languageCode)-\(countryCode)"
     }
 
     private func makeRequest(

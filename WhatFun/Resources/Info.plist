@@ -55,6 +55,10 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>RAWGAPIKey</key>
+	<string>$(RAWG_API_KEY)</string>
+	<key>TMDBReadAccessToken</key>
+	<string>$(TMDB_READ_ACCESS_TOKEN)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

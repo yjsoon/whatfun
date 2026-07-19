@@ -6,6 +6,7 @@ import UIKit
 
 struct ItemEditorView: View {
     private let itemID: UUID?
+    private let onPrepareSave: ((LibraryItem) -> Void)?
 
     @Query private var matchingItems: [LibraryItem]
     @Environment(\.dismiss) private var dismiss
@@ -24,9 +25,11 @@ struct ItemEditorView: View {
     init(
         itemID: UUID? = nil,
         initialKind: MediaKind = .book,
-        initialTitle: String = ""
+        initialTitle: String = "",
+        onPrepareSave: ((LibraryItem) -> Void)? = nil
     ) {
         self.itemID = itemID
+        self.onPrepareSave = onPrepareSave
         let queryID = itemID ?? UUID()
         _matchingItems = Query(
             filter: #Predicate<LibraryItem> { $0.id == queryID }
@@ -316,6 +319,7 @@ struct ItemEditorView: View {
             try await reconcileArtwork(for: item)
             try await reconcilePodcastFeed(for: item)
             let reminder = reconcileReminder(for: item)
+            onPrepareSave?(item)
 
             let activity = ActivityService(context: modelContext)
             if isNew {
