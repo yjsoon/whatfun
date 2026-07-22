@@ -1,6 +1,6 @@
 # Icon explorations
 
-First-round riffs on the current pinwheel app icon, produced July 2026. All icons are
+Riffs on the current pinwheel app icon, produced July 2026. All icons are
 1024×1024 vector SVGs; every variation ships in a light and a dark build. `gallery.html`
 is a self-contained side-by-side viewer for all of them (open it in any browser).
 
@@ -23,6 +23,15 @@ highlight/shadow fringe. `gen.py` regenerates all eight SVGs; ramps are one-line
 Same pinwheel language and ember ramp, with the petal tips re-carved so the true
 negative space forms a play button, a camera aperture, a five-point rating star, or a
 heart. `gen_b_centers.py` regenerates the set.
+
+## d-star — round 2, the chosen direction
+
+The rating-star mark developed further after review: the five cards now physically lap
+each other (deepest closes the loop over the lightest, one deliberate seam), the mark is
+scaled to Apple's icon-grid proportion (740px circle on the 1024 canvas), and the glyphs
+carry the full a-shades letterpress emboss. Five palette schemes — ember mono, analogous
+warm sweep, matched-value five-hue spectrum, coral/teal duotone, and jewel tones — each
+in light and dark. `gen_d_star.py` regenerates the set.
 
 ## c-composer — iOS 26 Icon Composer rebuild
 
