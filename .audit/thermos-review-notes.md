@@ -136,7 +136,28 @@ Error path sets `didFail` without clearing same-asset `image`, so `wifi.slash` s
 ### Subagents
 
 Launched:
-- thermo-nuclear-review-subagent `bc-0d4032d4-2a5d-5fd0-b88a-22ce9a6e06eb`
-- thermo-nuclear-code-quality-review-subagent `bc-1cbc9814-eeb6-5ba2-b3d0-1a8c3285a625`
+- thermo-nuclear-review-subagent `bc-0d4032d4-2a5d-5fd0-b88a-22ce9a6e06eb` — still running
+- thermo-nuclear-code-quality-review-subagent `bc-1cbc9814-eeb6-5ba2-b3d0-1a8c3285a625` — returned
 
-Waiting on both before the unified verdict.
+Waiting on the branch-audit reviewer before the unified verdict.
+
+## Code-quality reviewer (`bc-1cbc9814-eeb6-5ba2-b3d0-1a8c3285a625`)
+
+**Does not meet the bar.** `RemoteHTTPURL` / `PodcastFeedPrivacy.isSensitive` are the right canonical pieces; the PR bolted them on as extra branches and a hand-rolled lock.
+
+Overlaps parent notes: gate completeness, continuation mutex, redundant `mergeDetails` sortTitle restore, SearchView 995, editor grandfathering.
+
+| Pri | Finding | Parent take |
+| --- | --- | --- |
+| 1 | Five-piece continuation mutex. Prefer one serial work queue. | Agree the lock is too much machinery. Queue is the judo; exclusivity requirement is real. |
+| 2 | `validateDraftURLs` is a second persist policy. Fold into reconciles. | Agree. |
+| 3 | Cover three-flag state machine; disagreeing retention; dead downsample arm; cancel can leave a cleared cell. | Agree on complexity. Keep-last on same-asset size reload is the intended behaviour. |
+| 4 | Gate leaked into view methods; restore-from-trash ungated. Put gate in services. | Agree; this is also a correctness hole. |
+| 5 | Three podcast-feed writers. One `PodcastFeedStore.attach`. | Agree as follow-up judo, not a PR-#10 behavioural defect. |
+| 6 | Inserter sortTitle restore is dead after `setTitle`. | Agree; delete it. |
+| 7 | Attribution `parsePublic` copied four times. | Agree. |
+| 8 | RSS `parse` guard duplicates HTTPClient / extra error type. | Agree as cleanup. |
+| 9 | `PodcastFeedPrivacy` lives in Search; public refresh uses `parse` not `parsePublic`. | Privacy location: agree. Public `parse` vs `parsePublic`: RSS uses `secretless()`, so disk URLCache may not apply — leave for security reviewer. |
+| 10 | SearchView 995; extract `QuickAddView` before the next touch crosses 1k. | Agree. |
+
+Do not synthesise the shipping verdict until the security pass returns.
