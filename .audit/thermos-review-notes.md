@@ -136,10 +136,8 @@ Error path sets `didFail` without clearing same-asset `image`, so `wifi.slash` s
 ### Subagents
 
 Launched:
-- thermo-nuclear-review-subagent `bc-0d4032d4-2a5d-5fd0-b88a-22ce9a6e06eb` — still running
+- thermo-nuclear-review-subagent `bc-0d4032d4-2a5d-5fd0-b88a-22ce9a6e06eb` — returned
 - thermo-nuclear-code-quality-review-subagent `bc-1cbc9814-eeb6-5ba2-b3d0-1a8c3285a625` — returned
-
-Waiting on the branch-audit reviewer before the unified verdict.
 
 ## Code-quality reviewer (`bc-1cbc9814-eeb6-5ba2-b3d0-1a8c3285a625`)
 
@@ -161,3 +159,57 @@ Overlaps parent notes: gate completeness, continuation mutex, redundant `mergeDe
 | 10 | SearchView 995; extract `QuickAddView` before the next touch crosses 1k. | Agree. |
 
 Do not synthesise the shipping verdict until the security pass returns.
+
+## Branch-audit reviewer (`bc-0d4032d4-2a5d-5fd0-b88a-22ce9a6e06eb`)
+
+**No high findings.** One medium: restore-gate completeness.
+
+### Medium — ungated trash/archive restore, including a same-view race
+
+Gate covers import apply, replace-all restore, purgeExpired, deletePermanently. Row restore on Recently Deleted and Archive still `modelContext.save()` immediately (`recoverFromTrash` / `restoreFromArchive` both save).
+
+New implication vs parent notes: Recently Deleted `.task` runs gated `purgeExpired()` (awaits credential/reminder I/O after `context.delete`, save at the end). Restore stays tappable. That ungated save can commit a half-purged graph — same hazard the exclusive slot was rewritten to close.
+
+`deletePermanently` captures a live `LibraryItem`/`UserList`, then waits on the slot. After replace-all rebuild, `permanentlyDelete` can hit an invalidated model or delete the new row with the same UUID. `purgeExpired` re-fetches inside the gate.
+
+PR #10 merge notes already listed ungated row restore as non-blocking. Bugbot did not flag this. Cancellation on waiters is **not** a stuck-lock bug (security); quality still wants a queue.
+
+### Verified safe (agreed)
+
+- `RemoteHTTPURL` fetch/persist gates hold on touched paths. Grandfathered file rows stay; refresh does not fetch.
+- Public RSS `parse` (not `parsePublic`) is OK: live client is `secretless()`. Persist of userinfo/token as public is blocked on editor/import/search.
+- Cover keep-last holds. Residual: cancelled artwork download can set `didFail` without mapping `URLError.cancelled`; previous image stays on top.
+- `setTitle` custom-key behaviour holds (Bugbot autofix).
+- PR #11 `allowed_bots: cursor` is not a privilege issue (`GITHUB_TOKEN` read-only).
+
+Kills quality’s public-feed `parsePublic` as a **security** finding. Keep it as optional cleanup.
+
+## Unified verdict
+
+**Security units of PR #10 hold, except the restore-gate was not finished.** No high. One medium correctness hole, overlapping both reviewers. Maintainability does not meet the code-quality bar: the new URL/privacy helpers are the right model, then the PR bolted extra branches and a continuation mutex around them.
+
+### Findings (deduplicated)
+
+1. **Medium / both — exclusive gate does not cover restore on the screens this PR gated.** `TrashViews` wrap purge and permanent delete, not row restore. Same-view: Restore during in-flight `purgeExpired` can `save()` a half-deleted context. `deletePermanently` waits on the slot with a live model. Fix: put the gate inside `TrashPurgeService` (purge, delete, restore) and re-fetch by ID after acquire. Archive restore too.
+
+2. **Quality — continuation mutex instead of a serial queue.** Correctness of FIFO handoff is OK (security). Still a structural regression vs the old counter. Nested re-entry is unused. Follow-up: one queue for mutations + coalesced maintenance.
+
+3. **Quality — `validateDraftURLs` + grandfather branches in the reconciles.** Second persist policy. Fold into one `accepted(draft:existing:parse:)`.
+
+4. **Quality — SearchView 995 lines.** Extract `QuickAddView` before the next edit crosses 1k. Attribution `parsePublic` does not belong here.
+
+5. **Quality — dead `mergeDetails` sortTitle restore.** `setTitle` already keeps a custom key. Delete the snapshot.
+
+6. **Quality — three feed persist writers; four attribution parses.** One `PodcastFeedStore.attach`; one persistable-attribution helper. Move `PodcastFeedPrivacy` out of Search.
+
+### Not bugs
+
+- Fetch/Link refusal of `file:` / `javascript:` / userinfo on covers and attributions.
+- Grandfathered non-HTTP rows remaining in SwiftData (stated).
+- Cover keep-last on same-asset reload.
+- PR #11 Claude `allowed_bots`.
+- Waiter cancellation leaving `isGateHeld` stuck (it does not).
+
+### Follow-up if anyone implements
+
+Gate restore (and re-fetch-after-wait delete) first. Then queue the scheduler, kill `validateDraftURLs`, extract QuickAdd, delete the inserter sortTitle restore. Do not “sprinkle more `RemoteHTTPURL` call sites.”
