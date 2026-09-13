@@ -85,6 +85,58 @@ These are hypotheses for the reviewers to confirm or kill. Not a verdict yet.
 - Home rail partition extracted; good. `visibleItems` still computed per body plus `HomeRails.partition`.
 - Artwork cache path still `WhatFun` — not in this diff.
 
-## Subagents
+## Independent verification (parent, while subagents run)
 
-Launching `thermo-nuclear-review-subagent` and `thermo-nuclear-code-quality-review-subagent` against `ee95ad9..deec7a4`. Diff at `/tmp/thermos/pr10.diff`.
+### Restore-gate completeness
+
+`ImportExportView.performRestore` holds `withRestoreGate` across coordinator restore and credential I/O. The form is `.disabled(isWorking)` with an overlay, but that disable is on Import & Export only. Navigation back to Settings → Recently Deleted is still plausible mid-restore.
+
+Recently Deleted:
+- `purgeExpired` and `deletePermanently` take the gate (this PR).
+- `restore(item)` / `restore(list)` / Archived `restore` do not.
+- `recoverFromTrash` is a synchronous `modelContext.save()` in `ActivityService`.
+
+Same hazard class the exclusive lock was rewritten to close. Reachability is the question: not the happy path, but the lock's whole purpose is the unhappy path.
+
+Cancellation on `exclusiveWaiters`: no `withTaskCancellationHandler`. A cancelled waiter stays parked until the holder resumes it, then still runs `operation()`. Unlikely deadlock; possible post-cancel mutation. Tests never cancel.
+
+Handoff itself looks correct on MainActor: holder leaves `isGateHeld == true` and resumes the next waiter.
+
+### URL enforcement on touched fetch/persist paths
+
+| Boundary | Rule used | Notes |
+| --- | --- | --- |
+| HTTPClient.send | parse | All metadata/RSS go through `secretless()` — no disk URLCache |
+| ArtworkRepository.data | parsePublic | Then `session.data(from:)` on `.shared` |
+| CoverArtworkView | parsePublic | File covers fail locally, `didFail` if remoteURLString set |
+| RSSPodcastFeedClient.refresh | parse | Duplicate of HTTPClient guard |
+| PodcastFeedSyncService feed URL | parse | Public and private |
+| Episode webpage / image persist | parsePublic | Tested for file webpage |
+| ItemEditor cover persist | parsePublic | Grandfather existing |
+| ItemEditor feed persist | parse + isSensitive | File grandfather via `existing != nil` |
+| Attribution Link / archive restore | parsePublic | Drops non-public from restored attribution URLs |
+| Apple feedURL mapping | metadataFeedURL = parse | Userinfo feeds still discovered, then classify() Keychains them |
+| StagedImport feed | parse | isSensitive → Keychain |
+| safePublicURL | parsePublic + isSensitive | |
+
+Untouched in this PR (out of scope unless a changed caller uses them): `PodcastFeedParser.resolveURL` still `URL(string:relativeTo:)`. Persist path now filters.
+
+HTTP to RFC1918 is explicitly allowed (`RemoteHTTPURLTests` accepts `http://192.168.1.10:8000/rss`). Local-network podcasts. Not a finding.
+
+### sortTitle
+
+`setTitle` only copies into `sortTitle` when they still match. Tests cover default rename and custom key. `MetadataLibraryInserter.mergeDetails` still snapshots and restores `sortTitle` after `setTitle` — redundant after the Bugbot autofix, not wrong.
+
+### Cover
+
+Same-asset reloads keep `image`. Failed decode keeps last image unless none exists. Cancellation swallows. New-asset still clears. Size 0/missing asset still clears (layout collapse flash).
+
+Error path sets `didFail` without clearing same-asset `image`, so `wifi.slash` sits under the last cover.
+
+### Subagents
+
+Launched:
+- thermo-nuclear-review-subagent `bc-0d4032d4-2a5d-5fd0-b88a-22ce9a6e06eb`
+- thermo-nuclear-code-quality-review-subagent `bc-1cbc9814-eeb6-5ba2-b3d0-1a8c3285a625`
+
+Waiting on both before the unified verdict.
